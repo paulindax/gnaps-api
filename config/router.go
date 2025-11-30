@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"gnaps-api/controllers"
+	"gnaps-api/utils"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -19,9 +20,7 @@ func DynamicControllerDispatcher(c *fiber.Ctx) error {
 
 	ctrl, ok := controllers.GetController(ctrlName)
 	if !ok {
-		return c.Status(404).JSON(fiber.Map{
-			"error": fmt.Sprintf("controller %s undefined", ctrlName),
-		})
+		return utils.NotFoundResponse(c, fmt.Sprintf("Controller '%s' not found", ctrlName))
 	}
 
 	return ctrl.Handle(action, c)
