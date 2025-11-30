@@ -39,6 +39,9 @@ func InitializeControllers(db *gorm.DB) {
 	dashboardService := services.NewDashboardService(db)
 	mediaService := services.NewMediaService()
 
+	// Initialize Controllers
+	publicEventsController := controllers.NewPublicEventsController(eventRepo, registrationRepo, schoolRepo)
+
 	// Initialize Refactored Controllers
 	eventsController := controllers.NewEventsController(eventService, schoolService)
 	newsController := controllers.NewNewsController(newsService)
@@ -66,4 +69,5 @@ func InitializeControllers(db *gorm.DB) {
 	controllers.RegisterController("documents", documentsController)
 	controllers.RegisterController("dashboard", dashboardController)
 	controllers.RegisterController("media", mediaController)
+	controllers.RegisterController("public-events", publicEventsController)
 }
