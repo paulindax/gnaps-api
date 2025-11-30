@@ -3,16 +3,20 @@ package controllers
 import (
 	"fmt"
 	"gnaps-api/models"
+	"gnaps-api/services"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 )
 
 type RegionsController struct {
+	regionService *services.RegionService
 }
 
-func init() {
-	RegisterController("regions", &RegionsController{})
+func NewRegionsController(regionService *services.RegionService) *RegionsController {
+	return &RegionsController{
+		regionService: regionService,
+	}
 }
 
 func (r *RegionsController) Handle(action string, c *fiber.Ctx) error {
@@ -28,53 +32,32 @@ func (r *RegionsController) Handle(action string, c *fiber.Ctx) error {
 	case "delete":
 		return r.delete(c)
 	default:
-		return c.Status(404).JSON(fiber.Map{
-			"error": fmt.Sprintf("unknown action %s", action),
-		})
+		return c.Status(404).JSON(fiber.Map{"error": fmt.Sprintf("unknown action %s", action)})
 	}
 }
 
-// list retrieves all non-deleted regions
 func (r *RegionsController) list(c *fiber.Ctx) error {
-	var regions []models.Region
-
-	// Query parameters for filtering
-	query := DB.Where("is_deleted = ?", false)
-
-	// General search parameter (searches both name and code)
-	search := c.Query("search")
-	fmt.Printf("[RegionsController] Search parameter: '%s'\n", search)
-	if search != "" {
-		searchPattern := "%" + search + "%"
-		fmt.Printf("[RegionsController] Applying search with pattern: %s\n", searchPattern)
-		query = query.Where("name LIKE ? OR code LIKE ?", searchPattern, searchPattern)
+	// Parse filters from query params
+	filters := make(map[string]interface{})
+	if search := c.Query("search"); search != "" {
+		filters["search"] = search
 	}
-
-	// Optional search by name (for backward compatibility)
 	if name := c.Query("name"); name != "" {
-		query = query.Where("name LIKE ?", "%"+name+"%")
+		filters["name"] = name
 	}
-
-	// Optional filter by code (for backward compatibility)
 	if code := c.Query("code"); code != "" {
-		query = query.Where("code = ?", code)
+		filters["code"] = code
 	}
 
 	// Pagination
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "10"))
-	offset := (page - 1) * limit
 
-	var total int64
-	query.Model(&models.Region{}).Count(&total)
-	fmt.Printf("[RegionsController] Total matching regions: %d\n", total)
-
-	result := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&regions)
-
-	if result.Error != nil {
+	regions, total, err := r.regionService.ListRegions(filters, page, limit)
+	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error":   "Failed to retrieve regions",
-			"details": result.Error.Error(),
+			"details": err.Error(),
 			"flash_message": fiber.Map{
 				"msg":  "Failed to retrieve regions",
 				"type": "error",
@@ -82,7 +65,6 @@ func (r *RegionsController) list(c *fiber.Ctx) error {
 		})
 	}
 
-	fmt.Printf("[RegionsController] Returning %d regions (page %d, limit %d)\n", len(regions), page, limit)
 	return c.JSON(fiber.Map{
 		"data": regions,
 		"pagination": fiber.Map{
@@ -93,146 +75,68 @@ func (r *RegionsController) list(c *fiber.Ctx) error {
 	})
 }
 
-// show retrieves a single region by ID
 func (r *RegionsController) show(c *fiber.Ctx) error {
-	// Get ID from URL params or query string
 	id := c.Params("id")
 	if id == "" {
 		id = c.Query("id")
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "ID is required",
-			"flash_message": fiber.Map{
-				"msg":  "ID is required",
-				"type": "error",
-			},
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
 	}
 
-	var region models.Region
-	result := DB.Where("id = ? AND is_deleted = ?", id, false).First(&region)
-
-	if result.Error != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Region not found",
-			"flash_message": fiber.Map{
-				"msg":  "Region not found",
-				"type": "error",
-			},
-		})
+	regionId, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
-	return c.JSON(fiber.Map{
-		"data": region,
-	})
+	region, err := r.regionService.GetRegionByID(uint(regionId))
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"data": region})
 }
 
-// create creates a new region
 func (r *RegionsController) create(c *fiber.Ctx) error {
 	var region models.Region
-
 	if err := c.BodyParser(&region); err != nil {
 		return c.Status(400).JSON(fiber.Map{
 			"error":   "Invalid request body",
 			"details": err.Error(),
-			"flash_message": fiber.Map{
-				"msg":  "Invalid request body",
-				"type": "error",
-			},
 		})
 	}
 
-	// Validate required fields
-	if region.Name == nil || *region.Name == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Name is required",
-			"flash_message": fiber.Map{
-				"msg":  "Name is required",
-				"type": "error",
-			},
-		})
-	}
-
-	if region.Code == nil || *region.Code == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Code is required",
-			"flash_message": fiber.Map{
-				"msg":  "Code is required",
-				"type": "error",
-			},
-		})
-	}
-
-	// Check if code already exists
-	var existing models.Region
-	if err := DB.Where("code = ? AND is_deleted = ?", region.Code, false).First(&existing).Error; err == nil {
-		return c.Status(409).JSON(fiber.Map{
-			"error": "Region with this code already exists",
-			"flash_message": fiber.Map{
-				"msg":  "Region with this code already exists",
-				"type": "error",
-			},
-		})
-	}
-
-	// Set default values
-	falseVal := false
-	region.IsDeleted = &falseVal
-
-	result := DB.Create(&region)
-
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to create region",
-			"details": result.Error.Error(),
-			"flash_message": fiber.Map{
-				"msg":  "Failed to create region",
-				"type": "error",
-			},
-		})
+	if err := r.regionService.CreateRegion(&region); err != nil {
+		if err.Error() == "region with this code already exists" {
+			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	return c.Status(201).JSON(fiber.Map{
 		"message": "Region created successfully",
-		"data":    region,
 		"flash_message": fiber.Map{
 			"msg":  "Region created successfully",
 			"type": "success",
 		},
+		"data": region,
 	})
 }
 
-// update updates an existing region
 func (r *RegionsController) update(c *fiber.Ctx) error {
-	// Get ID from URL params or query string
 	id := c.Params("id")
 	if id == "" {
 		id = c.Query("id")
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "ID is required",
-			"flash_message": fiber.Map{
-				"msg":  "ID is required",
-				"type": "error",
-			},
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
 	}
 
-	var region models.Region
-	result := DB.Where("id = ? AND is_deleted = ?", id, false).First(&region)
-
-	if result.Error != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Region not found",
-			"flash_message": fiber.Map{
-				"msg":  "Region not found",
-				"type": "error",
-			},
-		})
+	regionId, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
 	var updateData models.Region
@@ -240,106 +144,61 @@ func (r *RegionsController) update(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{
 			"error":   "Invalid request body",
 			"details": err.Error(),
-			"flash_message": fiber.Map{
-				"msg":  "Invalid request body",
-				"type": "error",
-			},
 		})
 	}
 
-	// Check if code is being changed and if new code already exists
-	if updateData.Code != nil && *updateData.Code != *region.Code {
-		var existing models.Region
-		if err := DB.Where("code = ? AND id != ? AND is_deleted = ?", updateData.Code, id, false).First(&existing).Error; err == nil {
-			return c.Status(409).JSON(fiber.Map{
-				"error": "Region with this code already exists",
-				"flash_message": fiber.Map{
-					"msg":  "Region with this code already exists",
-					"type": "error",
-				},
-			})
-		}
-	}
-
-	// Update only provided fields
+	// Build updates map
 	updates := make(map[string]interface{})
 	if updateData.Name != nil {
-		updates["name"] = updateData.Name
+		updates["name"] = *updateData.Name
 	}
 	if updateData.Code != nil {
-		updates["code"] = updateData.Code
+		updates["code"] = *updateData.Code
 	}
 
-	result = DB.Model(&region).Updates(updates)
-
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to update region",
-			"details": result.Error.Error(),
-			"flash_message": fiber.Map{
-				"msg":  "Failed to update region",
-				"type": "error",
-			},
-		})
+	if err := r.regionService.UpdateRegion(uint(regionId), updates); err != nil {
+		if err.Error() == "region not found" {
+			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		}
+		if err.Error() == "region with this code already exists" {
+			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// Fetch updated record
-	DB.First(&region, id)
+	// Get updated region
+	region, _ := r.regionService.GetRegionByID(uint(regionId))
 
 	return c.JSON(fiber.Map{
 		"message": "Region updated successfully",
-		"data":    region,
 		"flash_message": fiber.Map{
 			"msg":  "Region updated successfully",
 			"type": "success",
 		},
+		"data": region,
 	})
 }
 
-// delete soft deletes a region
 func (r *RegionsController) delete(c *fiber.Ctx) error {
-	// Get ID from URL params or query string
 	id := c.Params("id")
 	if id == "" {
 		id = c.Query("id")
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "ID is required",
-			"flash_message": fiber.Map{
-				"msg":  "ID is required",
-				"type": "error",
-			},
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
 	}
 
-	var region models.Region
-	result := DB.Where("id = ? AND is_deleted = ?", id, false).First(&region)
-
-	if result.Error != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Region not found",
-			"flash_message": fiber.Map{
-				"msg":  "Region not found",
-				"type": "error",
-			},
-		})
+	regionId, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
-	// Soft delete by setting is_deleted flag
-	trueVal := true
-	result = DB.Model(&region).Update("is_deleted", &trueVal)
-
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to delete region",
-			"details": result.Error.Error(),
-			"flash_message": fiber.Map{
-				"msg":  "Failed to delete region",
-				"type": "error",
-			},
-		})
+	if err := r.regionService.DeleteRegion(uint(regionId)); err != nil {
+		if err.Error() == "region not found" {
+			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	return c.JSON(fiber.Map{

@@ -17,6 +17,8 @@ type EventRegistration struct {
 	RegisteredBy      *int64  `json:"registered_by,omitempty" gorm:"column:registered_by"`
 	PaymentStatus     *string `json:"payment_status,omitempty" gorm:"column:payment_status"`
 	PaymentReference  *string `json:"payment_reference,omitempty" gorm:"column:payment_reference"`
+	PaymentMethod     *string `json:"payment_method,omitempty" gorm:"column:payment_method"`
+	PaymentPhone      *string `json:"payment_phone,omitempty" gorm:"column:payment_phone"`
 	RegistrationDate  *string `json:"registration_date,omitempty" gorm:"column:registration_date"`
 	NumberOfAttendees *int    `json:"number_of_attendees,omitempty" gorm:"column:number_of_attendees"`
 	IsDeleted         *bool   `json:"is_deleted,omitempty" gorm:"column:is_deleted"`

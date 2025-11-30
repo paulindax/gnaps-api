@@ -26,6 +26,7 @@ type Event struct {
 	RegistrationDeadline *string  `json:"registration_deadline,omitempty" gorm:"column:registration_deadline"`
 	Status               *string  `json:"status,omitempty" gorm:"column:status"`
 	ImageUrl             *string  `json:"image_url,omitempty" gorm:"column:image_url"`
+	RegistrationCode     *string  `json:"registration_code,omitempty" gorm:"column:registration_code;unique"`
 	IsDeleted            *bool    `json:"is_deleted,omitempty" gorm:"column:is_deleted"`
 	RegisteredCount      int      `json:"registered_count" gorm:"-"`
 }

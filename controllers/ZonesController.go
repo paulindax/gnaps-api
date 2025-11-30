@@ -3,16 +3,20 @@ package controllers
 import (
 	"fmt"
 	"gnaps-api/models"
+	"gnaps-api/services"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 )
 
 type ZonesController struct {
+	zoneService *services.ZoneService
 }
 
-func init() {
-	RegisterController("zones", &ZonesController{})
+func NewZonesController(zoneService *services.ZoneService) *ZonesController {
+	return &ZonesController{
+		zoneService: zoneService,
+	}
 }
 
 func (z *ZonesController) Handle(action string, c *fiber.Ctx) error {
@@ -28,55 +32,35 @@ func (z *ZonesController) Handle(action string, c *fiber.Ctx) error {
 	case "delete":
 		return z.delete(c)
 	default:
-		return c.Status(404).JSON(fiber.Map{
-			"error": fmt.Sprintf("unknown action %s", action),
-		})
+		return c.Status(404).JSON(fiber.Map{"error": fmt.Sprintf("unknown action %s", action)})
 	}
 }
 
-// list retrieves all non-deleted zones
 func (z *ZonesController) list(c *fiber.Ctx) error {
-	var zones []models.Zone
-
-	// Query parameters for filtering
-	query := DB.Where("is_deleted = ?", false).Order("region_id ASC, name ASC")
-
-	// Optional filter by region_id
+	// Parse filters from query params
+	filters := make(map[string]interface{})
 	if regionID := c.Query("region_id"); regionID != "" {
-		query = query.Where("region_id = ?", regionID)
+		filters["region_id"] = regionID
 	}
-
-	// General search parameter (searches both name and code)
-	search := c.Query("search")
-	if search != "" {
-		searchPattern := "%" + search + "%"
-		query = query.Where("name LIKE ? OR code LIKE ?", searchPattern, searchPattern)
+	if search := c.Query("search"); search != "" {
+		filters["search"] = search
 	}
-
-	// Optional search by name (for backward compatibility)
 	if name := c.Query("name"); name != "" {
-		query = query.Where("name LIKE ?", "%"+name+"%")
+		filters["name"] = name
 	}
-
-	// Optional filter by code (for backward compatibility)
 	if code := c.Query("code"); code != "" {
-		query = query.Where("code = ?", code)
+		filters["code"] = code
 	}
 
 	// Pagination
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "10"))
-	offset := (page - 1) * limit
 
-	var total int64
-	query.Model(&models.Zone{}).Count(&total)
-
-	result := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&zones)
-
-	if result.Error != nil {
+	zones, total, err := z.zoneService.ListZones(filters, page, limit)
+	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error":   "Failed to retrieve zones",
-			"details": result.Error.Error(),
+			"details": err.Error(),
 			"flash_message": fiber.Map{
 				"msg":  "Failed to retrieve zones",
 				"type": "error",
@@ -94,168 +78,68 @@ func (z *ZonesController) list(c *fiber.Ctx) error {
 	})
 }
 
-// show retrieves a single zone by ID
 func (z *ZonesController) show(c *fiber.Ctx) error {
-	// Get ID from URL params or query string
 	id := c.Params("id")
 	if id == "" {
 		id = c.Query("id")
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "ID is required",
-			"flash_message": fiber.Map{
-				"msg":  "ID is required",
-				"type": "error",
-			},
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
 	}
 
-	var zone models.Zone
-	result := DB.Where("id = ? AND is_deleted = ?", id, false).First(&zone)
-
-	if result.Error != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Zone not found",
-			"flash_message": fiber.Map{
-				"msg":  "Zone not found",
-				"type": "error",
-			},
-		})
+	zoneId, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
-	return c.JSON(fiber.Map{
-		"data": zone,
-	})
+	zone, err := z.zoneService.GetZoneByID(uint(zoneId))
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"data": zone})
 }
 
-// create creates a new zone
 func (z *ZonesController) create(c *fiber.Ctx) error {
 	var zone models.Zone
-
 	if err := c.BodyParser(&zone); err != nil {
 		return c.Status(400).JSON(fiber.Map{
 			"error":   "Invalid request body",
 			"details": err.Error(),
-			"flash_message": fiber.Map{
-				"msg":  "Invalid request body",
-				"type": "error",
-			},
 		})
 	}
 
-	// Validate required fields
-	if zone.Name == nil || *zone.Name == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Name is required",
-			"flash_message": fiber.Map{
-				"msg":  "Name is required",
-				"type": "error",
-			},
-		})
-	}
-
-	if zone.Code == nil || *zone.Code == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Code is required",
-			"flash_message": fiber.Map{
-				"msg":  "Code is required",
-				"type": "error",
-			},
-		})
-	}
-
-	if zone.RegionId == nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Region ID is required",
-			"flash_message": fiber.Map{
-				"msg":  "Region ID is required",
-				"type": "error",
-			},
-		})
-	}
-
-	// Verify that the region exists
-	var region models.Region
-	if err := DB.Where("id = ? AND is_deleted = ?", zone.RegionId, false).First(&region).Error; err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid region ID - Region does not exist",
-			"flash_message": fiber.Map{
-				"msg":  "Invalid region ID - Region does not exist",
-				"type": "error",
-			},
-		})
-	}
-
-	// Check if code already exists within the same region
-	var existing models.Zone
-	if err := DB.Where("code = ? AND region_id = ? AND is_deleted = ?", zone.Code, zone.RegionId, false).First(&existing).Error; err == nil {
-		return c.Status(409).JSON(fiber.Map{
-			"error": "Zone with this code already exists in this region",
-			"flash_message": fiber.Map{
-				"msg":  "Zone with this code already exists in this region",
-				"type": "error",
-			},
-		})
-	}
-
-	// Set default values
-	falseVal := false
-	zone.IsDeleted = &falseVal
-
-	result := DB.Create(&zone)
-
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to create zone",
-			"details": result.Error.Error(),
-			"flash_message": fiber.Map{
-				"msg":  "Failed to create zone",
-				"type": "error",
-			},
-		})
+	if err := z.zoneService.CreateZone(&zone); err != nil {
+		if err.Error() == "zone with this code already exists" {
+			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	return c.Status(201).JSON(fiber.Map{
 		"message": "Zone created successfully",
-		"data":    zone,
 		"flash_message": fiber.Map{
 			"msg":  "Zone created successfully",
 			"type": "success",
 		},
+		"data": zone,
 	})
 }
 
-// update updates an existing zone
 func (z *ZonesController) update(c *fiber.Ctx) error {
-	// Get ID from URL params or query string
 	id := c.Params("id")
 	if id == "" {
 		id = c.Query("id")
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "ID is required",
-			"flash_message": fiber.Map{
-				"msg":  "ID is required",
-				"type": "error",
-			},
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
 	}
 
-	var zone models.Zone
-	result := DB.Where("id = ? AND is_deleted = ?", id, false).First(&zone)
-
-	if result.Error != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Zone not found",
-			"flash_message": fiber.Map{
-				"msg":  "Zone not found",
-				"type": "error",
-			},
-		})
+	zoneId, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
 	var updateData models.Zone
@@ -263,128 +147,64 @@ func (z *ZonesController) update(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{
 			"error":   "Invalid request body",
 			"details": err.Error(),
-			"flash_message": fiber.Map{
-				"msg":  "Invalid request body",
-				"type": "error",
-			},
 		})
 	}
 
-	// If region_id is being changed, verify the new region exists
-	if updateData.RegionId != nil && *updateData.RegionId != *zone.RegionId {
-		var region models.Region
-		if err := DB.Where("id = ? AND is_deleted = ?", updateData.RegionId, false).First(&region).Error; err != nil {
-			return c.Status(400).JSON(fiber.Map{
-				"error": "Invalid region ID - Region does not exist",
-				"flash_message": fiber.Map{
-					"msg":  "Invalid region ID - Region does not exist",
-					"type": "error",
-				},
-			})
-		}
-	}
-
-	// Check if code is being changed and if new code already exists in the region
-	regionIDForCheck := zone.RegionId
-	if updateData.RegionId != nil {
-		regionIDForCheck = updateData.RegionId
-	}
-
-	if updateData.Code != nil && *updateData.Code != *zone.Code {
-		var existing models.Zone
-		if err := DB.Where("code = ? AND region_id = ? AND id != ? AND is_deleted = ?", updateData.Code, regionIDForCheck, id, false).First(&existing).Error; err == nil {
-			return c.Status(409).JSON(fiber.Map{
-				"error": "Zone with this code already exists in this region",
-				"flash_message": fiber.Map{
-					"msg":  "Zone with this code already exists in this region",
-					"type": "error",
-				},
-			})
-		}
-	}
-
-	// Update only provided fields
+	// Build updates map
 	updates := make(map[string]interface{})
 	if updateData.Name != nil {
-		updates["name"] = updateData.Name
+		updates["name"] = *updateData.Name
 	}
 	if updateData.Code != nil {
-		updates["code"] = updateData.Code
+		updates["code"] = *updateData.Code
 	}
 	if updateData.RegionId != nil {
-		updates["region_id"] = updateData.RegionId
+		updates["region_id"] = *updateData.RegionId
 	}
 
-	result = DB.Model(&zone).Updates(updates)
-
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to update zone",
-			"details": result.Error.Error(),
-			"flash_message": fiber.Map{
-				"msg":  "Failed to update zone",
-				"type": "error",
-			},
-		})
+	if err := z.zoneService.UpdateZone(uint(zoneId), updates); err != nil {
+		if err.Error() == "zone not found" {
+			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		}
+		if err.Error() == "zone with this code already exists" {
+			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// Fetch updated record
-	DB.First(&zone, id)
+	// Get updated zone
+	zone, _ := z.zoneService.GetZoneByID(uint(zoneId))
 
 	return c.JSON(fiber.Map{
 		"message": "Zone updated successfully",
-		"data":    zone,
 		"flash_message": fiber.Map{
 			"msg":  "Zone updated successfully",
 			"type": "success",
 		},
+		"data": zone,
 	})
 }
 
-// delete soft deletes a zone
 func (z *ZonesController) delete(c *fiber.Ctx) error {
-	// Get ID from URL params or query string
 	id := c.Params("id")
 	if id == "" {
 		id = c.Query("id")
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "ID is required",
-			"flash_message": fiber.Map{
-				"msg":  "ID is required",
-				"type": "error",
-			},
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
 	}
 
-	var zone models.Zone
-	result := DB.Where("id = ? AND is_deleted = ?", id, false).First(&zone)
-
-	if result.Error != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Zone not found",
-			"flash_message": fiber.Map{
-				"msg":  "Zone not found",
-				"type": "error",
-			},
-		})
+	zoneId, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
-	// Soft delete by setting is_deleted flag
-	trueVal := true
-	result = DB.Model(&zone).Update("is_deleted", &trueVal)
-
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to delete zone",
-			"details": result.Error.Error(),
-			"flash_message": fiber.Map{
-				"msg":  "Failed to delete zone",
-				"type": "error",
-			},
-		})
+	if err := z.zoneService.DeleteZone(uint(zoneId)); err != nil {
+		if err.Error() == "zone not found" {
+			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	return c.JSON(fiber.Map{

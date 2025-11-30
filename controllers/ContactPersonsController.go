@@ -3,16 +3,20 @@ package controllers
 import (
 	"fmt"
 	"gnaps-api/models"
+	"gnaps-api/services"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 )
 
 type ContactPersonsController struct {
+	contactPersonService *services.ContactPersonService
 }
 
-func init() {
-	RegisterController("contact_persons", &ContactPersonsController{})
+func NewContactPersonsController(contactPersonService *services.ContactPersonService) *ContactPersonsController {
+	return &ContactPersonsController{
+		contactPersonService: contactPersonService,
+	}
 }
 
 func (cp *ContactPersonsController) Handle(action string, c *fiber.Ctx) error {
@@ -28,68 +32,48 @@ func (cp *ContactPersonsController) Handle(action string, c *fiber.Ctx) error {
 	case "delete":
 		return cp.delete(c)
 	default:
-		return c.Status(404).JSON(fiber.Map{
-			"error": fmt.Sprintf("unknown action %s", action),
-		})
+		return c.Status(404).JSON(fiber.Map{"error": fmt.Sprintf("unknown action %s", action)})
 	}
 }
 
-// list retrieves all contact persons
 func (cp *ContactPersonsController) list(c *fiber.Ctx) error {
-	var contactPersons []models.ContactPerson
-
-	// Base query
-	query := DB.Model(&models.ContactPerson{})
-
-	// Optional filter by school_id
+	// Parse filters from query params
+	filters := make(map[string]interface{})
 	if schoolID := c.Query("school_id"); schoolID != "" {
-		query = query.Where("school_id = ?", schoolID)
+		filters["school_id"] = schoolID
 	}
-
-	// Optional search by first name
 	if firstName := c.Query("first_name"); firstName != "" {
-		query = query.Where("first_name LIKE ?", "%"+firstName+"%")
+		filters["first_name"] = firstName
 	}
-
-	// Optional search by last name
 	if lastName := c.Query("last_name"); lastName != "" {
-		query = query.Where("last_name LIKE ?", "%"+lastName+"%")
+		filters["last_name"] = lastName
 	}
-
-	// Optional search by full name (searches both first and last name)
 	if name := c.Query("name"); name != "" {
-		query = query.Where("CONCAT(first_name, ' ', last_name) LIKE ?", "%"+name+"%")
+		filters["name"] = name
 	}
-
-	// Optional filter by relation
 	if relation := c.Query("relation"); relation != "" {
-		query = query.Where("relation = ?", relation)
+		filters["relation"] = relation
 	}
-
-	// Optional filter by email
 	if email := c.Query("email"); email != "" {
-		query = query.Where("email = ?", email)
+		filters["email"] = email
 	}
-
-	// Optional filter by mobile_no
 	if mobileNo := c.Query("mobile_no"); mobileNo != "" {
-		query = query.Where("mobile_no = ?", mobileNo)
+		filters["mobile_no"] = mobileNo
 	}
 
 	// Pagination
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "10"))
-	offset := (page - 1) * limit
 
-	var total int64
-	query.Count(&total)
-
-	result := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&contactPersons)
-
-	if result.Error != nil {
+	contactPersons, total, err := cp.contactPersonService.ListContactPersons(filters, page, limit)
+	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error":   "Failed to retrieve contact persons",
-			"details": result.Error.Error(),
+			"details": err.Error(),
+			"flash_message": fiber.Map{
+				"msg":  "Failed to retrieve contact persons",
+				"type": "error",
+			},
 		})
 	}
 
@@ -103,38 +87,31 @@ func (cp *ContactPersonsController) list(c *fiber.Ctx) error {
 	})
 }
 
-// show retrieves a single contact person by ID
 func (cp *ContactPersonsController) show(c *fiber.Ctx) error {
-	// Get ID from URL params or query string
 	id := c.Params("id")
 	if id == "" {
 		id = c.Query("id")
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "ID is required",
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
 	}
 
-	var contactPerson models.ContactPerson
-	result := DB.First(&contactPerson, id)
-
-	if result.Error != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Contact person not found",
-		})
+	contactPersonId, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
-	return c.JSON(fiber.Map{
-		"data": contactPerson,
-	})
+	contactPerson, err := cp.contactPersonService.GetContactPersonByID(uint(contactPersonId))
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"data": contactPerson})
 }
 
-// create creates a new contact person
 func (cp *ContactPersonsController) create(c *fiber.Ctx) error {
 	var contactPerson models.ContactPerson
-
 	if err := c.BodyParser(&contactPerson); err != nil {
 		return c.Status(400).JSON(fiber.Map{
 			"error":   "Invalid request body",
@@ -142,79 +119,39 @@ func (cp *ContactPersonsController) create(c *fiber.Ctx) error {
 		})
 	}
 
-	// Validate required fields
-	if contactPerson.SchoolId == nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "School ID is required",
-		})
-	}
-
-	if contactPerson.FirstName == nil || *contactPerson.FirstName == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "First name is required",
-		})
-	}
-
-	if contactPerson.LastName == nil || *contactPerson.LastName == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Last name is required",
-		})
-	}
-
-	// Verify that the school exists
-	var school models.School
-	if err := DB.Where("id = ? AND is_deleted = ?", contactPerson.SchoolId, false).First(&school).Error; err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid school ID - School does not exist",
-		})
-	}
-
-	// Check if email already exists for this school (if provided)
-	if contactPerson.Email != nil && *contactPerson.Email != "" {
-		var existing models.ContactPerson
-		if err := DB.Where("email = ? AND school_id = ?", contactPerson.Email, contactPerson.SchoolId).First(&existing).Error; err == nil {
-			return c.Status(409).JSON(fiber.Map{
-				"error": "Contact person with this email already exists for this school",
-			})
+	if err := cp.contactPersonService.CreateContactPerson(&contactPerson); err != nil {
+		if err.Error() == "school not found" {
+			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
 		}
-	}
-
-	result := DB.Create(&contactPerson)
-
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to create contact person",
-			"details": result.Error.Error(),
-		})
+		if err.Error() == "contact person with this email already exists for this school" {
+			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	return c.Status(201).JSON(fiber.Map{
 		"message": "Contact person created successfully",
-		"data":    contactPerson,
+		"flash_message": fiber.Map{
+			"msg":  "Contact person created successfully",
+			"type": "success",
+		},
+		"data": contactPerson,
 	})
 }
 
-// update updates an existing contact person
 func (cp *ContactPersonsController) update(c *fiber.Ctx) error {
-	// Get ID from URL params or query string
 	id := c.Params("id")
 	if id == "" {
 		id = c.Query("id")
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "ID is required",
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
 	}
 
-	var contactPerson models.ContactPerson
-	result := DB.First(&contactPerson, id)
-
-	if result.Error != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Contact person not found",
-		})
+	contactPersonId, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
 	var updateData models.ContactPerson
@@ -225,109 +162,80 @@ func (cp *ContactPersonsController) update(c *fiber.Ctx) error {
 		})
 	}
 
-	// If school_id is being changed, verify the new school exists
-	if updateData.SchoolId != nil {
-		if contactPerson.SchoolId == nil || *updateData.SchoolId != *contactPerson.SchoolId {
-			var school models.School
-			if err := DB.Where("id = ? AND is_deleted = ?", updateData.SchoolId, false).First(&school).Error; err != nil {
-				return c.Status(400).JSON(fiber.Map{
-					"error": "Invalid school ID - School does not exist",
-				})
-			}
-		}
-	}
-
-	// Determine which school_id to use for email check
-	schoolIDForCheck := contactPerson.SchoolId
-	if updateData.SchoolId != nil {
-		schoolIDForCheck = updateData.SchoolId
-	}
-
-	// Check if email is being changed and if new email already exists for the school
-	if updateData.Email != nil && *updateData.Email != "" {
-		if contactPerson.Email == nil || *updateData.Email != *contactPerson.Email {
-			var existingEmail models.ContactPerson
-			if err := DB.Where("email = ? AND school_id = ? AND id != ?", updateData.Email, schoolIDForCheck, id).First(&existingEmail).Error; err == nil {
-				return c.Status(409).JSON(fiber.Map{
-					"error": "Contact person with this email already exists for this school",
-				})
-			}
-		}
-	}
-
-	// Update only provided fields
+	// Build updates map
 	updates := make(map[string]interface{})
-	if updateData.SchoolId != nil {
-		updates["school_id"] = updateData.SchoolId
-	}
 	if updateData.FirstName != nil {
-		updates["first_name"] = updateData.FirstName
+		updates["first_name"] = *updateData.FirstName
 	}
 	if updateData.LastName != nil {
-		updates["last_name"] = updateData.LastName
-	}
-	if updateData.Relation != nil {
-		updates["relation"] = updateData.Relation
+		updates["last_name"] = *updateData.LastName
 	}
 	if updateData.Email != nil {
-		updates["email"] = updateData.Email
+		updates["email"] = *updateData.Email
 	}
 	if updateData.MobileNo != nil {
-		updates["mobile_no"] = updateData.MobileNo
+		updates["mobile_no"] = *updateData.MobileNo
+	}
+	if updateData.Relation != nil {
+		updates["relation"] = *updateData.Relation
+	}
+	if updateData.SchoolId != nil {
+		updates["school_id"] = *updateData.SchoolId
 	}
 
-	result = DB.Model(&contactPerson).Updates(updates)
-
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to update contact person",
-			"details": result.Error.Error(),
-		})
+	if err := cp.contactPersonService.UpdateContactPerson(uint(contactPersonId), updates); err != nil {
+		if err.Error() == "contact person not found" {
+			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		}
+		if err.Error() == "school not found" {
+			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		}
+		if err.Error() == "contact person with this email already exists for this school" {
+			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// Fetch updated record
-	DB.First(&contactPerson, id)
+	// Get updated contact person
+	contactPerson, _ := cp.contactPersonService.GetContactPersonByID(uint(contactPersonId))
 
 	return c.JSON(fiber.Map{
 		"message": "Contact person updated successfully",
-		"data":    contactPerson,
+		"flash_message": fiber.Map{
+			"msg":  "Contact person updated successfully",
+			"type": "success",
+		},
+		"data": contactPerson,
 	})
 }
 
-// delete soft deletes a contact person
 func (cp *ContactPersonsController) delete(c *fiber.Ctx) error {
-	// Get ID from URL params or query string
 	id := c.Params("id")
 	if id == "" {
 		id = c.Query("id")
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "ID is required",
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
 	}
 
-	var contactPerson models.ContactPerson
-	result := DB.First(&contactPerson, id)
-
-	if result.Error != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Contact person not found",
-		})
+	contactPersonId, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
-	// Soft delete using GORM's built-in soft delete (DeletedAt)
-	result = DB.Delete(&contactPerson)
-
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to delete contact person",
-			"details": result.Error.Error(),
-		})
+	if err := cp.contactPersonService.DeleteContactPerson(uint(contactPersonId)); err != nil {
+		if err.Error() == "contact person not found" {
+			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	return c.JSON(fiber.Map{
 		"message": "Contact person deleted successfully",
+		"flash_message": fiber.Map{
+			"msg":  "Contact person deleted successfully",
+			"type": "success",
+		},
 	})
 }

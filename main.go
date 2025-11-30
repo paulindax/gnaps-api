@@ -27,6 +27,9 @@ func main() {
 	// Set the database connection for controllers
 	controllers.DB = config.DBConn
 
+	// Initialize dependency injection for refactored controllers
+	config.InitializeControllers(config.DBConn)
+
 	// Generate models from database tables (only if GENERATE_MODELS=true)
 	if os.Getenv("GENERATE_MODELS") == "true" {
 		modelsDir := filepath.Join(".", "models")
@@ -52,6 +55,8 @@ func main() {
 	// Public routes (no authentication required)
 	public := api.Group("")
 	public.All("/auth/:action", config.DynamicControllerDispatcher)
+	public.All("/public-events/:action/:id", config.DynamicControllerDispatcher)
+	public.All("/public-events/:action", config.DynamicControllerDispatcher)
 
 	// Protected routes (authentication required)
 	protected := api.Group("")
