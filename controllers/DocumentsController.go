@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gnaps-api/models"
 	"gnaps-api/services"
+	"gnaps-api/utils"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -42,9 +43,7 @@ func (d *DocumentsController) Handle(action string, c *fiber.Ctx) error {
 	case "reviewSubmission":
 		return d.reviewSubmission(c)
 	default:
-		return c.Status(404).JSON(fiber.Map{
-			"error": fmt.Sprintf("unknown action %s", action),
-		})
+		return utils.NotFoundResponse(c, fmt.Sprintf("unknown action %s", action))
 	}
 }
 
@@ -65,7 +64,7 @@ func (d *DocumentsController) list(c *fiber.Ctx) error {
 
 	documents, total, err := d.documentService.ListDocuments(filters, page, limit)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to fetch documents"})
+		return utils.ServerErrorResponse(c, "Failed to fetch documents")
 	}
 
 	return c.JSON(fiber.Map{
@@ -81,12 +80,12 @@ func (d *DocumentsController) show(c *fiber.Ctx) error {
 	id := c.Params("id")
 	documentId, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	document, err := d.documentService.GetDocumentByID(uint(documentId))
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		return utils.NotFoundResponse(c, err.Error())
 	}
 
 	return c.JSON(document)
@@ -96,20 +95,19 @@ func (d *DocumentsController) show(c *fiber.Ctx) error {
 func (d *DocumentsController) create(c *fiber.Ctx) error {
 	userId, ok := c.Locals("user_id").(uint)
 	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+		return utils.UnauthorizedResponse(c, "Unauthorized")
 	}
 
 	var document models.Document
 	if err := c.BodyParser(&document); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	if err := d.documentService.CreateDocument(&document, userId); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
-	c.Locals("flash_message", "Document created successfully")
-	return c.Status(201).JSON(document)
+	return utils.SuccessResponseWithStatus(c, 201, document, "Document created successfully")
 }
 
 // Update a document
@@ -117,12 +115,12 @@ func (d *DocumentsController) update(c *fiber.Ctx) error {
 	id := c.Params("id")
 	documentId, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	var updates models.Document
 	if err := c.BodyParser(&updates); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	// Convert to map for partial updates
@@ -145,16 +143,15 @@ func (d *DocumentsController) update(c *fiber.Ctx) error {
 
 	if err := d.documentService.UpdateDocument(uint(documentId), updateMap); err != nil {
 		if err.Error() == "document not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+			return utils.NotFoundResponse(c, err.Error())
 		}
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
 	// Fetch updated document
 	document, _ := d.documentService.GetDocumentByID(uint(documentId))
 
-	c.Locals("flash_message", "Document updated successfully")
-	return c.JSON(document)
+	return utils.SuccessResponse(c, document, "Document updated successfully")
 }
 
 // Delete a document (soft delete)
@@ -162,38 +159,36 @@ func (d *DocumentsController) delete(c *fiber.Ctx) error {
 	id := c.Params("id")
 	documentId, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	if err := d.documentService.DeleteDocument(uint(documentId)); err != nil {
 		if err.Error() == "document not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+			return utils.NotFoundResponse(c, err.Error())
 		}
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
-	c.Locals("flash_message", "Document deleted successfully")
-	return c.JSON(fiber.Map{"success": true, "message": "document deleted successfully"})
+	return utils.SuccessResponse(c, nil, "Document deleted successfully")
 }
 
 // Submit a document (create submission)
 func (d *DocumentsController) submitDocument(c *fiber.Ctx) error {
 	userId, ok := c.Locals("user_id").(uint)
 	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+		return utils.UnauthorizedResponse(c, "Unauthorized")
 	}
 
 	var submission models.DocumentSubmission
 	if err := c.BodyParser(&submission); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	if err := d.documentService.CreateSubmission(&submission, userId); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
-	c.Locals("flash_message", "Document submitted successfully")
-	return c.Status(201).JSON(submission)
+	return utils.SuccessResponseWithStatus(c, 201, submission, "Document submitted successfully")
 }
 
 // Get all submissions for a document or school
@@ -216,7 +211,7 @@ func (d *DocumentsController) getSubmissions(c *fiber.Ctx) error {
 
 	submissions, total, err := d.documentService.ListSubmissions(filters, page, limit)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to fetch submissions"})
+		return utils.ServerErrorResponse(c, "Failed to fetch submissions")
 	}
 
 	return c.JSON(fiber.Map{
@@ -232,12 +227,12 @@ func (d *DocumentsController) getSubmission(c *fiber.Ctx) error {
 	id := c.Params("id")
 	submissionId, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	submission, err := d.documentService.GetSubmissionByID(uint(submissionId))
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		return utils.NotFoundResponse(c, err.Error())
 	}
 
 	return c.JSON(submission)
@@ -248,12 +243,12 @@ func (d *DocumentsController) updateSubmission(c *fiber.Ctx) error {
 	id := c.Params("id")
 	submissionId, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	var updates models.DocumentSubmission
 	if err := c.BodyParser(&updates); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	// Convert to map for partial updates
@@ -273,16 +268,15 @@ func (d *DocumentsController) updateSubmission(c *fiber.Ctx) error {
 
 	if err := d.documentService.UpdateSubmission(uint(submissionId), updateMap); err != nil {
 		if err.Error() == "submission not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+			return utils.NotFoundResponse(c, err.Error())
 		}
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
 	// Fetch updated submission
 	submission, _ := d.documentService.GetSubmissionByID(uint(submissionId))
 
-	c.Locals("flash_message", "Submission updated successfully")
-	return c.JSON(submission)
+	return utils.SuccessResponse(c, submission, "Submission updated successfully")
 }
 
 // Delete a submission (soft delete)
@@ -290,18 +284,17 @@ func (d *DocumentsController) deleteSubmission(c *fiber.Ctx) error {
 	id := c.Params("id")
 	submissionId, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	if err := d.documentService.DeleteSubmission(uint(submissionId)); err != nil {
 		if err.Error() == "submission not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+			return utils.NotFoundResponse(c, err.Error())
 		}
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
-	c.Locals("flash_message", "Submission deleted successfully")
-	return c.JSON(fiber.Map{"success": true, "message": "submission deleted successfully"})
+	return utils.SuccessResponse(c, nil, "Submission deleted successfully")
 }
 
 // Review a submission
@@ -309,12 +302,12 @@ func (d *DocumentsController) reviewSubmission(c *fiber.Ctx) error {
 	id := c.Params("id")
 	submissionId, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	userId, ok := c.Locals("user_id").(uint)
 	if !ok {
-		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+		return utils.UnauthorizedResponse(c, "Unauthorized")
 	}
 
 	var review struct {
@@ -323,19 +316,18 @@ func (d *DocumentsController) reviewSubmission(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&review); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	if err := d.documentService.ReviewSubmission(uint(submissionId), review.Status, review.ReviewNotes, userId); err != nil {
 		if err.Error() == "submission not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+			return utils.NotFoundResponse(c, err.Error())
 		}
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
 	// Fetch updated submission
 	submission, _ := d.documentService.GetSubmissionByID(uint(submissionId))
 
-	c.Locals("flash_message", "Submission reviewed successfully")
-	return c.JSON(submission)
+	return utils.SuccessResponse(c, submission, "Submission reviewed successfully")
 }

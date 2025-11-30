@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gnaps-api/models"
 	"gnaps-api/services"
+	"gnaps-api/utils"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -32,7 +33,7 @@ func (s *SchoolsController) Handle(action string, c *fiber.Ctx) error {
 	case "delete":
 		return s.delete(c)
 	default:
-		return c.Status(404).JSON(fiber.Map{"error": fmt.Sprintf("unknown action %s", action)})
+		return utils.NotFoundResponse(c, fmt.Sprintf("unknown action %s", action))
 	}
 }
 
@@ -61,10 +62,7 @@ func (s *SchoolsController) list(c *fiber.Ctx) error {
 
 	schools, total, err := s.schoolService.ListSchools(filters, page, limit)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to retrieve schools",
-			"details": err.Error(),
-		})
+		return utils.ServerErrorResponse(c, "Failed to retrieve schools")
 	}
 
 	return c.JSON(fiber.Map{
@@ -84,17 +82,17 @@ func (s *SchoolsController) show(c *fiber.Ctx) error {
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
+		return utils.ValidationErrorResponse(c, "ID is required")
 	}
 
 	schoolId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	school, err := s.schoolService.GetSchoolByID(uint(schoolId))
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		return utils.NotFoundResponse(c, err.Error())
 	}
 
 	return c.JSON(fiber.Map{"data": school})
@@ -103,10 +101,7 @@ func (s *SchoolsController) show(c *fiber.Ctx) error {
 func (s *SchoolsController) create(c *fiber.Ctx) error {
 	var school models.School
 	if err := c.BodyParser(&school); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error":   "Invalid request body",
-			"details": err.Error(),
-		})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	if err := s.schoolService.CreateSchool(&school); err != nil {
@@ -114,15 +109,12 @@ func (s *SchoolsController) create(c *fiber.Ctx) error {
 		errMsg := err.Error()
 		if errMsg == "school with this member number already exists" ||
 			errMsg == "school with this email already exists" {
-			return c.Status(409).JSON(fiber.Map{"error": errMsg})
+			return utils.ConflictResponse(c, errMsg)
 		}
-		return c.Status(400).JSON(fiber.Map{"error": errMsg})
+		return utils.ValidationErrorResponse(c, errMsg)
 	}
 
-	return c.Status(201).JSON(fiber.Map{
-		"message": "School created successfully",
-		"data":    school,
-	})
+	return utils.SuccessResponseWithStatus(c, 201, school, "School created successfully")
 }
 
 func (s *SchoolsController) update(c *fiber.Ctx) error {
@@ -132,20 +124,17 @@ func (s *SchoolsController) update(c *fiber.Ctx) error {
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
+		return utils.ValidationErrorResponse(c, "ID is required")
 	}
 
 	schoolId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	var updateData models.School
 	if err := c.BodyParser(&updateData); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error":   "Invalid request body",
-			"details": err.Error(),
-		})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	// Build updates map
@@ -187,22 +176,19 @@ func (s *SchoolsController) update(c *fiber.Ctx) error {
 	if err := s.schoolService.UpdateSchool(uint(schoolId), updates); err != nil {
 		errMsg := err.Error()
 		if errMsg == "school not found" {
-			return c.Status(404).JSON(fiber.Map{"error": errMsg})
+			return utils.NotFoundResponse(c, errMsg)
 		}
 		if errMsg == "school with this member number already exists" ||
 			errMsg == "school with this email already exists" {
-			return c.Status(409).JSON(fiber.Map{"error": errMsg})
+			return utils.ConflictResponse(c, errMsg)
 		}
-		return c.Status(400).JSON(fiber.Map{"error": errMsg})
+		return utils.ValidationErrorResponse(c, errMsg)
 	}
 
 	// Get updated school
 	school, _ := s.schoolService.GetSchoolByID(uint(schoolId))
 
-	return c.JSON(fiber.Map{
-		"message": "School updated successfully",
-		"data":    school,
-	})
+	return utils.SuccessResponse(c, school, "School updated successfully")
 }
 
 func (s *SchoolsController) delete(c *fiber.Ctx) error {
@@ -212,20 +198,20 @@ func (s *SchoolsController) delete(c *fiber.Ctx) error {
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
+		return utils.ValidationErrorResponse(c, "ID is required")
 	}
 
 	schoolId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	if err := s.schoolService.DeleteSchool(uint(schoolId)); err != nil {
 		if err.Error() == "school not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+			return utils.NotFoundResponse(c, err.Error())
 		}
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
-	return c.JSON(fiber.Map{"message": "School deleted successfully"})
+	return utils.SuccessResponse(c, nil, "School deleted successfully")
 }

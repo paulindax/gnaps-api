@@ -3,6 +3,7 @@ package controllers
 import (
 	"fmt"
 	"gnaps-api/services"
+	"gnaps-api/utils"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -24,9 +25,7 @@ func (m *MediaController) Handle(action string, c *fiber.Ctx) error {
 	case "upload":
 		return m.upload(c)
 	default:
-		return c.Status(404).JSON(fiber.Map{
-			"error": fmt.Sprintf("unknown action %s", action),
-		})
+		return utils.NotFoundResponse(c, fmt.Sprintf("unknown action %s", action))
 	}
 }
 
@@ -35,32 +34,18 @@ func (m *MediaController) upload(c *fiber.Ctx) error {
 	// Get the uploaded file
 	file, err := c.FormFile("file")
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "no file uploaded",
-		})
+		return utils.ValidationErrorResponse(c, "No file uploaded")
 	}
 
 	// Call the service to upload the file
 	uploadResponse, err := m.mediaService.UploadFile(file)
 	if err != nil {
-		// Return appropriate error response
-		return c.Status(400).JSON(fiber.Map{
-			"error": err.Error(),
-			"flash_message": fiber.Map{
-				"msg":  err.Error(),
-				"type": "error",
-			},
-		})
+		return utils.ValidationErrorResponse(c, err.Error())
 	}
 
 	// Return success response
-	return c.JSON(fiber.Map{
-		"success":  true,
+	return utils.SuccessResponse(c, fiber.Map{
 		"url":      uploadResponse.URL,
 		"filename": uploadResponse.Filename,
-		"flash_message": fiber.Map{
-			"msg":  "File uploaded successfully",
-			"type": "success",
-		},
-	})
+	}, "File uploaded successfully")
 }

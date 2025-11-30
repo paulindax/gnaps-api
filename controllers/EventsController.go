@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gnaps-api/models"
 	"gnaps-api/services"
+	"gnaps-api/utils"
 	"log"
 	"strconv"
 
@@ -62,7 +63,7 @@ func (e *EventsController) Handle(action string, c *fiber.Ctx) error {
 	case "delete":
 		return e.delete(c)
 	default:
-		return c.Status(404).JSON(fiber.Map{"error": fmt.Sprintf("unknown action %s", action)})
+		return utils.NotFoundResponse(c, fmt.Sprintf("unknown action %s", action))
 	}
 }
 
@@ -75,7 +76,7 @@ func (e *EventsController) handlePublicEvents(action string, c *fiber.Ctx) error
 	case "schools":
 		return e.searchSchools(c)
 	default:
-		return c.Status(404).JSON(fiber.Map{"error": fmt.Sprintf("unknown action %s", action)})
+		return utils.NotFoundResponse(c, fmt.Sprintf("unknown action %s", action))
 	}
 }
 
@@ -86,12 +87,12 @@ func (e *EventsController) handleEventRegistrations(action string, c *fiber.Ctx)
 	default:
 		id := c.Params("id")
 		if id == "" {
-			return c.Status(400).JSON(fiber.Map{"error": "registration ID is required"})
+			return utils.ValidationErrorResponse(c, "registration ID is required")
 		}
 
 		registrationId, err := strconv.ParseUint(id, 10, 64)
 		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "invalid registration ID"})
+			return utils.ValidationErrorResponse(c, "invalid registration ID")
 		}
 
 		switch action {
@@ -101,7 +102,7 @@ func (e *EventsController) handleEventRegistrations(action string, c *fiber.Ctx)
 			if c.Method() == "DELETE" {
 				return e.cancelRegistration(c, uint(registrationId))
 			}
-			return c.Status(404).JSON(fiber.Map{"error": fmt.Sprintf("unknown action %s", action)})
+			return utils.NotFoundResponse(c, fmt.Sprintf("unknown action %s", action))
 		}
 	}
 }
@@ -128,7 +129,7 @@ func (e *EventsController) list(c *fiber.Ctx) error {
 
 	events, total, err := e.eventService.ListEvents(filters, page, limit)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to fetch events"})
+		return utils.ServerErrorResponse(c, "Failed to fetch events")
 	}
 
 	return c.JSON(fiber.Map{
@@ -145,12 +146,12 @@ func (e *EventsController) show(c *fiber.Ctx) error {
 	id := c.Params("id")
 	eventId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid event ID"})
+		return utils.ValidationErrorResponse(c, "Invalid event ID")
 	}
 
 	event, err := e.eventService.GetEventByID(uint(eventId))
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "event not found"})
+		return utils.NotFoundResponse(c, "Event not found")
 	}
 
 	return c.JSON(event)
@@ -162,26 +163,26 @@ func (e *EventsController) create(c *fiber.Ctx) error {
 	var event models.Event
 	if err := c.BodyParser(&event); err != nil {
 		log.Println("Error parsing request body:", err)
-		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	if err := e.eventService.CreateEvent(&event, userId); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to create event"})
+		return utils.ServerErrorResponse(c, "Failed to create event")
 	}
 
-	return c.Status(201).JSON(event)
+	return utils.SuccessResponseWithStatus(c, 201, event, "Event created successfully")
 }
 
 func (e *EventsController) update(c *fiber.Ctx) error {
 	id := c.Params("id")
 	eventId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid event ID"})
+		return utils.ValidationErrorResponse(c, "Invalid event ID")
 	}
 
 	var updates models.Event
 	if err := c.BodyParser(&updates); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	// Convert to map for partial updates
@@ -224,23 +225,23 @@ func (e *EventsController) update(c *fiber.Ctx) error {
 	}
 
 	if err := e.eventService.UpdateEvent(uint(eventId), updateMap); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
 	// Get updated event
 	event, _ := e.eventService.GetEventByID(uint(eventId))
-	return c.JSON(event)
+	return utils.SuccessResponse(c, event, "Event updated successfully")
 }
 
 func (e *EventsController) delete(c *fiber.Ctx) error {
 	id := c.Params("id")
 	eventId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid event ID"})
+		return utils.ValidationErrorResponse(c, "Invalid event ID")
 	}
 
 	if err := e.eventService.DeleteEvent(uint(eventId)); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to delete event"})
+		return utils.ServerErrorResponse(c, "Failed to delete event")
 	}
 
 	return c.Status(204).Send(nil)
@@ -253,20 +254,20 @@ func (e *EventsController) registerForEvent(c *fiber.Ctx, eventId uint) error {
 
 	var registration models.EventRegistration
 	if err := c.BodyParser(&registration); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	// Get event first to get registration code
 	event, err := e.eventService.GetEventByID(eventId)
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "event not found"})
+		return utils.NotFoundResponse(c, "Event not found")
 	}
 
 	if err := e.eventService.RegisterForEvent(*event.RegistrationCode, &registration, &userId); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return utils.ValidationErrorResponse(c, err.Error())
 	}
 
-	return c.Status(201).JSON(registration)
+	return utils.SuccessResponseWithStatus(c, 201, registration, "Registration successful")
 }
 
 func (e *EventsController) getEventRegistrations(c *fiber.Ctx, eventId uint) error {
@@ -275,7 +276,7 @@ func (e *EventsController) getEventRegistrations(c *fiber.Ctx, eventId uint) err
 
 	registrations, total, err := e.eventService.GetEventRegistrations(eventId, page, limit)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to fetch registrations"})
+		return utils.ServerErrorResponse(c, "Failed to fetch registrations")
 	}
 
 	// Populate school names
@@ -306,7 +307,7 @@ func (e *EventsController) getMyRegistrations(c *fiber.Ctx) error {
 
 	registrations, total, err := e.eventService.GetMyRegistrations(userId, page, limit)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to fetch registrations"})
+		return utils.ServerErrorResponse(c, "Failed to fetch registrations")
 	}
 
 	// Populate event titles and school names
@@ -337,7 +338,7 @@ func (e *EventsController) getMyRegistrations(c *fiber.Ctx) error {
 
 func (e *EventsController) cancelRegistration(c *fiber.Ctx, registrationId uint) error {
 	if err := e.eventService.CancelRegistration(registrationId); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to cancel registration"})
+		return utils.ServerErrorResponse(c, "Failed to cancel registration")
 	}
 
 	return c.Status(204).Send(nil)
@@ -350,7 +351,7 @@ func (e *EventsController) updatePaymentStatus(c *fiber.Ctx, registrationId uint
 	}
 
 	if err := c.BodyParser(&body); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	reference := ""
@@ -359,10 +360,10 @@ func (e *EventsController) updatePaymentStatus(c *fiber.Ctx, registrationId uint
 	}
 
 	if err := e.eventService.UpdatePaymentStatus(registrationId, body.PaymentStatus, reference); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to update payment status"})
+		return utils.ServerErrorResponse(c, "Failed to update payment status")
 	}
 
-	return c.Status(200).JSON(fiber.Map{"message": "payment status updated"})
+	return utils.SuccessResponse(c, fiber.Map{"payment_status": body.PaymentStatus}, "Payment status updated successfully")
 }
 
 // ==================== PUBLIC ENDPOINTS (NO AUTH) ====================
@@ -372,7 +373,7 @@ func (e *EventsController) getEventByCode(c *fiber.Ctx) error {
 
 	event, err := e.eventService.GetEventByCode(code)
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "event not found"})
+		return utils.NotFoundResponse(c, "Event not found")
 	}
 
 	return c.JSON(event)
@@ -383,14 +384,14 @@ func (e *EventsController) publicRegisterForEvent(c *fiber.Ctx) error {
 
 	var registration models.EventRegistration
 	if err := c.BodyParser(&registration); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	if err := e.eventService.RegisterForEvent(code, &registration, nil); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return utils.ValidationErrorResponse(c, err.Error())
 	}
 
-	return c.Status(201).JSON(registration)
+	return utils.SuccessResponseWithStatus(c, 201, registration, "Registration successful")
 }
 
 func (e *EventsController) searchSchools(c *fiber.Ctx) error {
@@ -399,7 +400,7 @@ func (e *EventsController) searchSchools(c *fiber.Ctx) error {
 
 	schools, err := e.schoolService.Search(keyword, limit)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to search schools"})
+		return utils.ServerErrorResponse(c, "Failed to search schools")
 	}
 
 	return c.JSON(schools)

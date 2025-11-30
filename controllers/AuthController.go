@@ -30,9 +30,7 @@ func (a *AuthController) Handle(action string, c *fiber.Ctx) error {
 	case "logout":
 		return a.logout(c)
 	default:
-		return c.Status(404).JSON(fiber.Map{
-			"error": fmt.Sprintf("unknown action %s", action),
-		})
+		return utils.NotFoundResponse(c, fmt.Sprintf("unknown action %s", action))
 	}
 }
 
@@ -55,47 +53,35 @@ type RegisterRequest struct {
 func (a *AuthController) login(c *fiber.Ctx) error {
 	var req LoginRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "invalid request body",
-		})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	// Validate input
 	if req.Username == "" || req.Password == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "username and password are required",
-		})
+		return utils.ValidationErrorResponse(c, "Username and password are required")
 	}
 
 	// Find user by username
 	var user models.User
 	if err := DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "invalid credentials",
-		})
+		return utils.UnauthorizedResponse(c, "Invalid credentials")
 	}
 
 	// Check if user is deleted
 	if user.IsDeleted != nil && *user.IsDeleted {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "account has been deleted",
-		})
+		return utils.UnauthorizedResponse(c, "Account has been deleted")
 	}
 
 	// Verify password
 	if user.EncryptedPassword == nil {
 		log.Println("We got to Encrypted")
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "invalid credentials",
-		})
+		return utils.UnauthorizedResponse(c, "Invalid credentials")
 	}
 
 	err := bcrypt.CompareHashAndPassword([]byte(*user.EncryptedPassword), []byte(req.Password))
 	log.Println("We got to Check Password")
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "invalid credentials",
-		})
+		return utils.UnauthorizedResponse(c, "Invalid credentials")
 	}
 
 	// Get user role
@@ -113,9 +99,7 @@ func (a *AuthController) login(c *fiber.Ctx) error {
 	// Generate JWT token
 	token, err := utils.GenerateJWT(user.ID, req.Username, username, role)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to generate token",
-		})
+		return utils.ServerErrorResponse(c, "Failed to generate token")
 	}
 
 	// Update sign in tracking
@@ -140,32 +124,24 @@ func (a *AuthController) login(c *fiber.Ctx) error {
 func (a *AuthController) register(c *fiber.Ctx) error {
 	var req RegisterRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "invalid request body",
-		})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	// Validate input
 	if req.Email == "" || req.Password == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "email and password are required",
-		})
+		return utils.ValidationErrorResponse(c, "Email and password are required")
 	}
 
 	// Check if user already exists
 	var existingUser models.User
 	if err := DB.Where("email = ?", req.Email).First(&existingUser).Error; err == nil {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error": "user with this email already exists",
-		})
+		return utils.ConflictResponse(c, "User with this email already exists")
 	}
 
 	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to hash password",
-		})
+		return utils.ServerErrorResponse(c, "Failed to hash password")
 	}
 
 	hashedPasswordStr := string(hashedPassword)
@@ -184,20 +160,16 @@ func (a *AuthController) register(c *fiber.Ctx) error {
 	}
 
 	if err := DB.Create(&user).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to create user",
-		})
+		return utils.ServerErrorResponse(c, "Failed to create user")
 	}
 
 	// Generate JWT token
 	token, err := utils.GenerateJWT(user.ID, req.Email, req.Username, role)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to generate token",
-		})
+		return utils.ServerErrorResponse(c, "Failed to generate token")
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+	return utils.SuccessResponseWithStatus(c, 201, fiber.Map{
 		"token": token,
 		"user": fiber.Map{
 			"id":         user.ID,
@@ -207,25 +179,21 @@ func (a *AuthController) register(c *fiber.Ctx) error {
 			"last_name":  user.LastName,
 			"role":       user.Role,
 		},
-	})
+	}, "Registration successful")
 }
 
 // refresh generates a new token from an existing valid token
 func (a *AuthController) refresh(c *fiber.Ctx) error {
 	authHeader := c.Get("Authorization")
 	if authHeader == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "missing authorization header",
-		})
+		return utils.UnauthorizedResponse(c, "Missing authorization header")
 	}
 
 	// Extract token
 	tokenString := authHeader[7:] // Remove "Bearer " prefix
 	newToken, err := utils.RefreshJWT(tokenString)
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "failed to refresh token",
-		})
+		return utils.UnauthorizedResponse(c, "Failed to refresh token")
 	}
 
 	return c.JSON(fiber.Map{
@@ -237,17 +205,13 @@ func (a *AuthController) refresh(c *fiber.Ctx) error {
 func (a *AuthController) me(c *fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uint)
 	if !ok {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "user not authenticated",
-		})
+		return utils.UnauthorizedResponse(c, "User not authenticated")
 	}
 
 	// Fetch user from database
 	var user models.User
 	if err := DB.First(&user, userID).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "user not found",
-		})
+		return utils.NotFoundResponse(c, "User not found")
 	}
 
 	return c.JSON(fiber.Map{

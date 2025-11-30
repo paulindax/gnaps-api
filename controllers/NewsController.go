@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gnaps-api/models"
 	"gnaps-api/services"
+	"gnaps-api/utils"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -46,7 +47,7 @@ func (n *NewsController) Handle(action string, c *fiber.Ctx) error {
 	case "approve_comment":
 		return n.approveComment(c)
 	default:
-		return c.Status(404).JSON(fiber.Map{"error": fmt.Sprintf("unknown action %s", action)})
+		return utils.NotFoundResponse(c, fmt.Sprintf("unknown action %s", action))
 	}
 }
 
@@ -83,10 +84,7 @@ func (n *NewsController) list(c *fiber.Ctx) error {
 
 	news, total, err := n.newsService.ListNews(userId, userRole, filters, page, limit)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to get user entities",
-			"details": err.Error(),
-		})
+		return utils.ServerErrorResponse(c, "Failed to retrieve news")
 	}
 
 	return c.JSON(fiber.Map{
@@ -106,12 +104,12 @@ func (n *NewsController) show(c *fiber.Ctx) error {
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
+		return utils.ValidationErrorResponse(c, "ID is required")
 	}
 
 	newsId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	userRole, _ := c.Locals("role").(string)
@@ -120,9 +118,9 @@ func (n *NewsController) show(c *fiber.Ctx) error {
 	newsItem, err := n.newsService.GetNewsByID(uint(newsId), userId, userRole)
 	if err != nil {
 		if err.Error() == "news not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+			return utils.NotFoundResponse(c, err.Error())
 		}
-		return c.Status(403).JSON(fiber.Map{"error": err.Error()})
+		return utils.ForbiddenResponse(c, err.Error())
 	}
 
 	return c.JSON(fiber.Map{"data": newsItem})
@@ -134,27 +132,17 @@ func (n *NewsController) create(c *fiber.Ctx) error {
 
 	var newsItem models.New
 	if err := c.BodyParser(&newsItem); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error":   "Invalid request body",
-			"details": err.Error(),
-		})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	if err := n.newsService.CreateNews(&newsItem, userId, userRole); err != nil {
 		if err.Error() == "you do not have permission to create news" {
-			return c.Status(403).JSON(fiber.Map{"error": err.Error()})
+			return utils.ForbiddenResponse(c, err.Error())
 		}
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return utils.ValidationErrorResponse(c, err.Error())
 	}
 
-	return c.Status(201).JSON(fiber.Map{
-		"message": "News created successfully",
-		"flash_message": fiber.Map{
-			"msg":  "News created successfully",
-			"type": "success",
-		},
-		"data": newsItem,
-	})
+	return utils.SuccessResponseWithStatus(c, 201, newsItem, "News created successfully")
 }
 
 func (n *NewsController) update(c *fiber.Ctx) error {
@@ -167,20 +155,17 @@ func (n *NewsController) update(c *fiber.Ctx) error {
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
+		return utils.ValidationErrorResponse(c, "ID is required")
 	}
 
 	newsId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	var updateData models.New
 	if err := c.BodyParser(&updateData); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error":   "Invalid request body",
-			"details": err.Error(),
-		})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	// Build updates map
@@ -221,25 +206,18 @@ func (n *NewsController) update(c *fiber.Ctx) error {
 
 	if err := n.newsService.UpdateNews(uint(newsId), updates, userId, userRole); err != nil {
 		if err.Error() == "news not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+			return utils.NotFoundResponse(c, err.Error())
 		}
 		if err.Error() == "you do not have permission to update news" {
-			return c.Status(403).JSON(fiber.Map{"error": err.Error()})
+			return utils.ForbiddenResponse(c, err.Error())
 		}
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return utils.ValidationErrorResponse(c, err.Error())
 	}
 
 	// Get updated news item
 	newsItem, _ := n.newsService.GetNewsByID(uint(newsId), userId, userRole)
 
-	return c.JSON(fiber.Map{
-		"message": "News updated successfully",
-		"flash_message": fiber.Map{
-			"msg":  "News updated successfully",
-			"type": "success",
-		},
-		"data": newsItem,
-	})
+	return utils.SuccessResponse(c, newsItem, "News updated successfully")
 }
 
 func (n *NewsController) delete(c *fiber.Ctx) error {
@@ -251,31 +229,25 @@ func (n *NewsController) delete(c *fiber.Ctx) error {
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
+		return utils.ValidationErrorResponse(c, "ID is required")
 	}
 
 	newsId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	if err := n.newsService.DeleteNews(uint(newsId), userRole); err != nil {
 		if err.Error() == "news not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+			return utils.NotFoundResponse(c, err.Error())
 		}
 		if err.Error() == "you do not have permission to delete news" {
-			return c.Status(403).JSON(fiber.Map{"error": err.Error()})
+			return utils.ForbiddenResponse(c, err.Error())
 		}
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
-	return c.JSON(fiber.Map{
-		"message": "News deleted successfully",
-		"flash_message": fiber.Map{
-			"msg":  "News deleted successfully",
-			"type": "success",
-		},
-	})
+	return utils.SuccessResponse(c, nil, "News deleted successfully")
 }
 
 // ==================== NEWS COMMENTS ENDPOINTS ====================
@@ -303,10 +275,7 @@ func (n *NewsController) listComments(c *fiber.Ctx) error {
 
 	comments, total, err := n.newsService.ListComments(filters, page, limit)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to retrieve comments",
-			"details": err.Error(),
-		})
+		return utils.ServerErrorResponse(c, "Failed to retrieve comments")
 	}
 
 	return c.JSON(fiber.Map{
@@ -326,17 +295,17 @@ func (n *NewsController) showComment(c *fiber.Ctx) error {
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
+		return utils.ValidationErrorResponse(c, "ID is required")
 	}
 
 	commentId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	comment, err := n.newsService.GetCommentByID(uint(commentId))
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		return utils.NotFoundResponse(c, err.Error())
 	}
 
 	return c.JSON(fiber.Map{"data": comment})
@@ -345,24 +314,14 @@ func (n *NewsController) showComment(c *fiber.Ctx) error {
 func (n *NewsController) createComment(c *fiber.Ctx) error {
 	var comment models.NewsComment
 	if err := c.BodyParser(&comment); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error":   "Invalid request body",
-			"details": err.Error(),
-		})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	if err := n.newsService.CreateComment(&comment); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return utils.ValidationErrorResponse(c, err.Error())
 	}
 
-	return c.Status(201).JSON(fiber.Map{
-		"message": "Comment created successfully",
-		"flash_message": fiber.Map{
-			"msg":  "Comment posted successfully. It will appear after approval.",
-			"type": "success",
-		},
-		"data": comment,
-	})
+	return utils.SuccessResponseWithStatus(c, 201, comment, "Comment posted successfully. It will appear after approval.")
 }
 
 func (n *NewsController) updateComment(c *fiber.Ctx) error {
@@ -372,20 +331,17 @@ func (n *NewsController) updateComment(c *fiber.Ctx) error {
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
+		return utils.ValidationErrorResponse(c, "ID is required")
 	}
 
 	commentId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	var updateData models.NewsComment
 	if err := c.BodyParser(&updateData); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error":   "Invalid request body",
-			"details": err.Error(),
-		})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	// Build updates map
@@ -399,22 +355,15 @@ func (n *NewsController) updateComment(c *fiber.Ctx) error {
 
 	if err := n.newsService.UpdateComment(uint(commentId), updates); err != nil {
 		if err.Error() == "comment not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+			return utils.NotFoundResponse(c, err.Error())
 		}
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
 	// Get updated comment
 	comment, _ := n.newsService.GetCommentByID(uint(commentId))
 
-	return c.JSON(fiber.Map{
-		"message": "Comment updated successfully",
-		"flash_message": fiber.Map{
-			"msg":  "Comment updated successfully",
-			"type": "success",
-		},
-		"data": comment,
-	})
+	return utils.SuccessResponse(c, comment, "Comment updated successfully")
 }
 
 func (n *NewsController) deleteComment(c *fiber.Ctx) error {
@@ -424,28 +373,22 @@ func (n *NewsController) deleteComment(c *fiber.Ctx) error {
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
+		return utils.ValidationErrorResponse(c, "ID is required")
 	}
 
 	commentId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	if err := n.newsService.DeleteComment(uint(commentId)); err != nil {
 		if err.Error() == "comment not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+			return utils.NotFoundResponse(c, err.Error())
 		}
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
-	return c.JSON(fiber.Map{
-		"message": "Comment deleted successfully",
-		"flash_message": fiber.Map{
-			"msg":  "Comment deleted successfully",
-			"type": "success",
-		},
-	})
+	return utils.SuccessResponse(c, nil, "Comment deleted successfully")
 }
 
 func (n *NewsController) approveComment(c *fiber.Ctx) error {
@@ -455,30 +398,23 @@ func (n *NewsController) approveComment(c *fiber.Ctx) error {
 	}
 
 	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
+		return utils.ValidationErrorResponse(c, "ID is required")
 	}
 
 	commentId, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
+		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
 	if err := n.newsService.ApproveComment(uint(commentId)); err != nil {
 		if err.Error() == "comment not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+			return utils.NotFoundResponse(c, err.Error())
 		}
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return utils.ServerErrorResponse(c, err.Error())
 	}
 
 	// Get updated comment
 	comment, _ := n.newsService.GetCommentByID(uint(commentId))
 
-	return c.JSON(fiber.Map{
-		"message": "Comment approved successfully",
-		"flash_message": fiber.Map{
-			"msg":  "Comment approved successfully",
-			"type": "success",
-		},
-		"data": comment,
-	})
+	return utils.SuccessResponse(c, comment, "Comment approved successfully")
 }
