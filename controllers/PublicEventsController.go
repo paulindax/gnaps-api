@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gnaps-api/models"
 	"gnaps-api/repositories"
+	"gnaps-api/utils"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -48,23 +49,17 @@ func (p *PublicEventsController) Handle(action string, c *fiber.Ctx) error {
 func (p *PublicEventsController) viewEvent(c *fiber.Ctx) error {
 	code := c.Params("id")
 	if code == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "registration code is required",
-		})
+		return utils.ValidationErrorResponse(c, "Registration code is required")
 	}
 
 	event, err := p.eventRepo.FindByCode(code)
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "event not found or registration link is invalid",
-		})
+		return utils.NotFoundResponse(c, "Event not found or registration link is invalid")
 	}
 
 	// Check if event is active
 	if event.Status != nil && *event.Status != "upcoming" && *event.Status != "active" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "event registration is not currently available",
-		})
+		return utils.ErrorResponse(c, 400, "Event registration is not currently available")
 	}
 
 	// Get registration count for this event
@@ -80,47 +75,35 @@ func (p *PublicEventsController) viewEvent(c *fiber.Ctx) error {
 func (p *PublicEventsController) registerForEvent(c *fiber.Ctx) error {
 	code := c.Params("id")
 	if code == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "registration code is required",
-		})
+		return utils.ValidationErrorResponse(c, "Registration code is required")
 	}
 
 	// Get event by code
 	event, err := p.eventRepo.FindByCode(code)
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "event not found or registration link is invalid",
-		})
+		return utils.NotFoundResponse(c, "Event not found or registration link is invalid")
 	}
 
 	// Check if event is active
 	if event.Status != nil && *event.Status != "upcoming" && *event.Status != "active" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "event registration is not currently available",
-		})
+		return utils.ErrorResponse(c, 400, "Event registration is not currently available")
 	}
 
 	// Parse registration data
 	var registration models.EventRegistration
 	if err := c.BodyParser(&registration); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "invalid request body",
-		})
+		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
 	// Validate required fields
 	if registration.SchoolId == nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "school_id is required",
-		})
+		return utils.ValidationErrorResponse(c, "School selection is required")
 	}
 
 	// Verify school exists
 	_, err = p.schoolRepo.FindByID(uint(*registration.SchoolId))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "invalid school_id",
-		})
+		return utils.ValidationErrorResponse(c, "Invalid school selected")
 	}
 
 	// Set event ID
@@ -135,14 +118,10 @@ func (p *PublicEventsController) registerForEvent(c *fiber.Ctx) error {
 	if event.IsPaid != nil && *event.IsPaid {
 		// For paid events, validate payment info
 		if registration.PaymentMethod == nil || *registration.PaymentMethod == "" {
-			return c.Status(400).JSON(fiber.Map{
-				"error": "payment_method is required for paid events",
-			})
+			return utils.ValidationErrorResponse(c, "Payment method is required for paid events")
 		}
 		if registration.PaymentPhone == nil || *registration.PaymentPhone == "" {
-			return c.Status(400).JSON(fiber.Map{
-				"error": "payment_phone is required for paid events",
-			})
+			return utils.ValidationErrorResponse(c, "Mobile money number is required for paid events")
 		}
 
 		pending := "pending"
@@ -161,19 +140,10 @@ func (p *PublicEventsController) registerForEvent(c *fiber.Ctx) error {
 
 	// Create registration
 	if err := p.registrationRepo.Create(&registration); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "failed to create registration",
-		})
+		return utils.ServerErrorResponse(c, "Failed to create registration. Please try again.")
 	}
 
-	return c.Status(201).JSON(fiber.Map{
-		"success": true,
-		"data":    registration,
-		"flash_message": fiber.Map{
-			"msg":  "Registration submitted successfully",
-			"type": "success",
-		},
-	})
+	return utils.SuccessResponseWithStatus(c, 201, registration, "Registration submitted successfully! We look forward to seeing you at the event.")
 }
 
 // searchSchools searches for schools by keyword (no auth required)
@@ -185,9 +155,7 @@ func (p *PublicEventsController) searchSchools(c *fiber.Ctx) error {
 
 	schools, err := p.schoolRepo.Search(keyword, 20)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "failed to search schools",
-		})
+		return utils.ServerErrorResponse(c, "Failed to search schools. Please try again.")
 	}
 
 	return c.JSON(schools)
