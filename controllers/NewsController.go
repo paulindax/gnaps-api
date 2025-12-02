@@ -87,6 +87,11 @@ func (n *NewsController) list(c *fiber.Ctx) error {
 		return utils.ServerErrorResponse(c, "Failed to retrieve news")
 	}
 
+	// Ensure news is never null (always return empty array instead of null)
+	if news == nil {
+		news = []models.New{}
+	}
+
 	return c.JSON(fiber.Map{
 		"data": news,
 		"pagination": fiber.Map{

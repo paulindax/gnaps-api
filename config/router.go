@@ -13,6 +13,11 @@ func DynamicControllerDispatcher(c *fiber.Ctx) error {
 	ctrlName := c.Params("controller")
 	action := c.Params("action")
 	authCtrl := strings.HasPrefix(c.Path(), "/api/auth/")
+	pubEvents := strings.HasPrefix(c.Path(), "/api/public-events/")
+
+	if pubEvents {
+		ctrlName = "public-events"
+	}
 
 	if authCtrl {
 		ctrlName = "auth"

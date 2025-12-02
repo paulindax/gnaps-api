@@ -45,7 +45,6 @@ func SuccessResponseWithStatus(c *fiber.Ctx, status int, data interface{}, messa
 // ErrorResponse returns a standardized error response with flash message
 func ErrorResponse(c *fiber.Ctx, status int, message string) error {
 	return c.Status(status).JSON(fiber.Map{
-		"error": message,
 		"flash_message": FlashMessage{
 			Msg:  message,
 			Type: "error",
@@ -56,7 +55,6 @@ func ErrorResponse(c *fiber.Ctx, status int, message string) error {
 // WarningResponse returns a standardized warning response
 func WarningResponse(c *fiber.Ctx, status int, message string) error {
 	return c.Status(status).JSON(fiber.Map{
-		"warning": message,
 		"flash_message": FlashMessage{
 			Msg:  message,
 			Type: "warning",
@@ -67,7 +65,6 @@ func WarningResponse(c *fiber.Ctx, status int, message string) error {
 // InfoResponse returns a standardized info response
 func InfoResponse(c *fiber.Ctx, status int, message string) error {
 	return c.Status(status).JSON(fiber.Map{
-		"info": message,
 		"flash_message": FlashMessage{
 			Msg:  message,
 			Type: "info",
@@ -78,7 +75,6 @@ func InfoResponse(c *fiber.Ctx, status int, message string) error {
 // ValidationErrorResponse returns a validation error response with flash message
 func ValidationErrorResponse(c *fiber.Ctx, message string) error {
 	return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-		"error": message,
 		"flash_message": FlashMessage{
 			Msg:  message,
 			Type: "error",
@@ -89,7 +85,6 @@ func ValidationErrorResponse(c *fiber.Ctx, message string) error {
 // NotFoundResponse returns a not found error response with flash message
 func NotFoundResponse(c *fiber.Ctx, message string) error {
 	return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-		"error": message,
 		"flash_message": FlashMessage{
 			Msg:  message,
 			Type: "error",
@@ -100,7 +95,6 @@ func NotFoundResponse(c *fiber.Ctx, message string) error {
 // UnauthorizedResponse returns an unauthorized error response with flash message
 func UnauthorizedResponse(c *fiber.Ctx, message string) error {
 	return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-		"error": message,
 		"flash_message": FlashMessage{
 			Msg:  message,
 			Type: "error",
@@ -111,7 +105,6 @@ func UnauthorizedResponse(c *fiber.Ctx, message string) error {
 // ForbiddenResponse returns a forbidden error response with flash message
 func ForbiddenResponse(c *fiber.Ctx, message string) error {
 	return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-		"error": message,
 		"flash_message": FlashMessage{
 			Msg:  message,
 			Type: "error",
@@ -122,7 +115,6 @@ func ForbiddenResponse(c *fiber.Ctx, message string) error {
 // ServerErrorResponse returns a server error response with flash message
 func ServerErrorResponse(c *fiber.Ctx, message string) error {
 	return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-		"error": message,
 		"flash_message": FlashMessage{
 			Msg:  message,
 			Type: "error",

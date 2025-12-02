@@ -284,7 +284,8 @@ func (s *NewsService) ListNews(userId uint, userRole string, filters map[string]
 	}
 
 	// Filter by role-based access
-	var accessibleNews []models.New
+	// Initialize as empty slice (not nil) to ensure JSON marshals as [] not null
+	accessibleNews := make([]models.New, 0)
 	for _, item := range allNews {
 		if s.CanAccessNews(item, regionIds, zoneIds, groupIds, schoolIds, userRole) {
 			accessibleNews = append(accessibleNews, item)
@@ -296,7 +297,7 @@ func (s *NewsService) ListNews(userId uint, userRole string, filters map[string]
 	start := (page - 1) * limit
 	end := start + limit
 
-	if start > len(accessibleNews) {
+	if start >= len(accessibleNews) {
 		return []models.New{}, total, nil
 	}
 

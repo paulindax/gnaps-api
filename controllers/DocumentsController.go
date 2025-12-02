@@ -137,7 +137,7 @@ func (d *DocumentsController) update(c *fiber.Ctx) error {
 	if updates.Status != nil {
 		updateMap["status"] = updates.Status
 	}
-	if updates.TemplateData != "" {
+	if len(updates.TemplateData) > 0 {
 		updateMap["template_data"] = updates.TemplateData
 	}
 
@@ -253,13 +253,13 @@ func (d *DocumentsController) updateSubmission(c *fiber.Ctx) error {
 
 	// Convert to map for partial updates
 	updateMap := make(map[string]interface{})
-	if updates.DocumentId != nil {
+	if updates.DocumentId != 0 {
 		updateMap["document_id"] = updates.DocumentId
 	}
-	if updates.SchoolId != nil {
+	if updates.SchoolId != 0 {
 		updateMap["school_id"] = updates.SchoolId
 	}
-	if updates.FormData != "" {
+	if len(updates.FormData) > 0 {
 		updateMap["form_data"] = updates.FormData
 	}
 	if updates.Status != nil {

@@ -193,10 +193,10 @@ func (e *EventsController) update(c *fiber.Ctx) error {
 	if updates.Description != nil {
 		updateMap["description"] = updates.Description
 	}
-	if updates.StartDate != "" {
+	if !updates.StartDate.IsZero() {
 		updateMap["start_date"] = updates.StartDate
 	}
-	if updates.EndDate != nil {
+	if !updates.EndDate.IsZero() {
 		updateMap["end_date"] = updates.EndDate
 	}
 	if updates.Location != nil {
@@ -214,7 +214,7 @@ func (e *EventsController) update(c *fiber.Ctx) error {
 	if updates.MaxAttendees != nil {
 		updateMap["max_attendees"] = updates.MaxAttendees
 	}
-	if updates.RegistrationDeadline != nil {
+	if !updates.RegistrationDeadline.IsZero() {
 		updateMap["registration_deadline"] = updates.RegistrationDeadline
 	}
 	if updates.Status != nil {
@@ -281,8 +281,8 @@ func (e *EventsController) getEventRegistrations(c *fiber.Ctx, eventId uint) err
 
 	// Populate school names
 	for i := range registrations {
-		if registrations[i].SchoolId != nil {
-			school, err := e.schoolService.GetSchoolByID(uint(*registrations[i].SchoolId))
+		if registrations[i].SchoolId != 0 {
+			school, err := e.schoolService.GetSchoolByID(uint(registrations[i].SchoolId))
 			if err == nil {
 				registrations[i].SchoolName = &school.Name
 			}
@@ -312,14 +312,14 @@ func (e *EventsController) getMyRegistrations(c *fiber.Ctx) error {
 
 	// Populate event titles and school names
 	for i := range registrations {
-		if registrations[i].EventId != nil {
-			event, err := e.eventService.GetEventByID(uint(*registrations[i].EventId))
+		if registrations[i].EventId != 0 {
+			event, err := e.eventService.GetEventByID(uint(registrations[i].EventId))
 			if err == nil {
 				registrations[i].EventTitle = &event.Title
 			}
 		}
-		if registrations[i].SchoolId != nil {
-			school, err := e.schoolService.GetSchoolByID(uint(*registrations[i].SchoolId))
+		if registrations[i].SchoolId != 0 {
+			school, err := e.schoolService.GetSchoolByID(uint(registrations[i].SchoolId))
 			if err == nil {
 				registrations[i].SchoolName = &school.Name
 			}

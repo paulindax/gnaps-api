@@ -25,8 +25,7 @@ func NewEventService(eventRepo *repositories.EventRepository, regRepo *repositor
 // CreateEvent creates a new event with auto-generated registration code
 func (s *EventService) CreateEvent(event *models.Event, userId uint) error {
 	// Set created_by
-	createdBy := int64(userId)
-	event.CreatedBy = &createdBy
+	event.CreatedBy = int64(userId)
 
 	// Set defaults
 	isDeleted := false
@@ -113,18 +112,16 @@ func (s *EventService) RegisterForEvent(eventCode string, registration *models.E
 	}
 
 	// Set event_id
-	eventIdInt := int64(event.ID)
-	registration.EventId = &eventIdInt
+	registration.EventId = int64(event.ID)
 
 	// Set registered_by if provided (for authenticated requests)
 	if userId != nil {
-		registeredBy := int64(*userId)
-		registration.RegisteredBy = &registeredBy
+		userIdInt64 := int64(*userId)
+		registration.RegisteredBy = &userIdInt64
 	}
 
 	// Set defaults
-	now := time.Now().Format("2006-01-02 15:04:05")
-	registration.RegistrationDate = &now
+	registration.RegistrationDate = time.Now()
 
 	isDeleted := false
 	registration.IsDeleted = &isDeleted
@@ -144,8 +141,8 @@ func (s *EventService) RegisterForEvent(eventCode string, registration *models.E
 // validateRegistration validates event registration
 func (s *EventService) validateRegistration(event *models.Event, registration *models.EventRegistration) error {
 	// Check if school already registered
-	if registration.SchoolId != nil {
-		exists, _ := s.regRepo.SchoolAlreadyRegistered(event.ID, *registration.SchoolId)
+	if registration.SchoolId != 0 {
+		exists, _ := s.regRepo.SchoolAlreadyRegistered(event.ID, registration.SchoolId)
 		if exists {
 			return errors.New("school already registered for this event")
 		}

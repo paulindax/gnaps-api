@@ -50,8 +50,7 @@ func (s *DocumentService) ListDocuments(filters map[string]interface{}, page, li
 
 func (s *DocumentService) CreateDocument(document *models.Document, userID uint) error {
 	// Set created_by
-	createdBy := int64(userID)
-	document.CreatedBy = &createdBy
+	document.CreatedBy = int64(userID)
 
 	return s.documentRepo.CreateDocument(document)
 }
@@ -106,8 +105,7 @@ func (s *DocumentService) ListSubmissions(filters map[string]interface{}, page, 
 
 func (s *DocumentService) CreateSubmission(submission *models.DocumentSubmission, userID uint) error {
 	// Set submitted_by
-	submittedBy := int64(userID)
-	submission.SubmittedBy = &submittedBy
+	submission.SubmittedBy = int64(userID)
 
 	return s.documentRepo.CreateSubmission(submission)
 }
@@ -153,17 +151,17 @@ func (s *DocumentService) ReviewSubmission(id uint, status string, reviewNotes *
 
 func (s *DocumentService) enrichSubmission(submission *models.DocumentSubmission) {
 	// Get document title
-	if title, err := s.documentRepo.GetDocumentTitle(submission.DocumentId); err == nil {
+	if title, err := s.documentRepo.GetDocumentTitle(&submission.DocumentId); err == nil && title != nil {
 		submission.DocumentTitle = title
 	}
 
 	// Get school name
-	if name, err := s.documentRepo.GetSchoolName(submission.SchoolId); err == nil {
+	if name, err := s.documentRepo.GetSchoolName(&submission.SchoolId); err == nil && name != nil {
 		submission.SchoolName = name
 	}
 
 	// Get submitter name
-	if name, err := s.documentRepo.GetUserName(submission.SubmittedBy); err == nil {
+	if name, err := s.documentRepo.GetUserName(&submission.SubmittedBy); err == nil && name != nil {
 		submission.SubmitterName = name
 	}
 }

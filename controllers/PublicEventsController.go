@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
 
 type PublicEventsController struct {
 	eventRepo        *repositories.EventRepository
 	registrationRepo *repositories.RegistrationRepository
 	schoolRepo       *repositories.SchoolRepository
+	db               *gorm.DB
 }
 
 // NewPublicEventsController creates a new instance of PublicEventsController
@@ -21,11 +23,13 @@ func NewPublicEventsController(
 	eventRepo *repositories.EventRepository,
 	registrationRepo *repositories.RegistrationRepository,
 	schoolRepo *repositories.SchoolRepository,
+	db *gorm.DB,
 ) *PublicEventsController {
 	return &PublicEventsController{
 		eventRepo:        eventRepo,
 		registrationRepo: registrationRepo,
 		schoolRepo:       schoolRepo,
+		db:               db,
 	}
 }
 
@@ -38,6 +42,8 @@ func (p *PublicEventsController) Handle(action string, c *fiber.Ctx) error {
 		return p.registerForEvent(c)
 	case "schools":
 		return p.searchSchools(c)
+	case "school-balance":
+		return p.getSchoolBalance(c)
 	default:
 		return c.Status(404).JSON(fiber.Map{
 			"error": fmt.Sprintf("unknown action %s", action),
@@ -96,23 +102,21 @@ func (p *PublicEventsController) registerForEvent(c *fiber.Ctx) error {
 	}
 
 	// Validate required fields
-	if registration.SchoolId == nil {
+	if registration.SchoolId == 0 {
 		return utils.ValidationErrorResponse(c, "School selection is required")
 	}
 
 	// Verify school exists
-	_, err = p.schoolRepo.FindByID(uint(*registration.SchoolId))
+	_, err = p.schoolRepo.FindByID(uint(registration.SchoolId))
 	if err != nil {
 		return utils.ValidationErrorResponse(c, "Invalid school selected")
 	}
 
 	// Set event ID
-	eventID := int64(event.ID)
-	registration.EventId = &eventID
+	registration.EventId = int64(event.ID)
 
 	// Set registration date
-	now := time.Now().Format("2006-01-02 15:04:05")
-	registration.RegistrationDate = &now
+	registration.RegistrationDate = time.Now()
 
 	// Set payment status
 	if event.IsPaid != nil && *event.IsPaid {
@@ -159,4 +163,40 @@ func (p *PublicEventsController) searchSchools(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(schools)
+}
+
+// getSchoolBalance returns the last unpaid bill balance for a school (no auth required)
+func (p *PublicEventsController) getSchoolBalance(c *fiber.Ctx) error {
+	schoolID := c.Params("id")
+	if schoolID == "" {
+		return utils.ValidationErrorResponse(c, "School ID is required")
+	}
+
+	// Get the last unpaid bill for the school
+	var schoolBill models.SchoolBill
+	err := p.db.Where("school_id = ? AND (is_paid IS NULL OR is_paid = ?)", schoolID, false).
+		Order("created_at DESC").
+		First(&schoolBill).Error
+
+	if err != nil {
+		// If no bill found, return zero balance
+		if err == gorm.ErrRecordNotFound {
+			return c.JSON(fiber.Map{
+				"balance": 0,
+				"has_balance": false,
+			})
+		}
+		return utils.ServerErrorResponse(c, "Failed to retrieve school balance")
+	}
+
+	balance := 0.0
+	if schoolBill.Balance != nil {
+		balance = *schoolBill.Balance
+	}
+
+	return c.JSON(fiber.Map{
+		"balance": balance,
+		"has_balance": balance > 0,
+		"bill_id": schoolBill.ID,
+	})
 }

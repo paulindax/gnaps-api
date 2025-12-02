@@ -24,6 +24,11 @@ func InitializeControllers(db *gorm.DB) {
 	executiveRepo := repositories.NewExecutiveRepository(db)
 	contactPersonRepo := repositories.NewContactPersonRepository(db)
 	documentRepo := repositories.NewDocumentRepository(db)
+	financeAccountRepo := repositories.NewFinanceAccountRepository(db)
+	billParticularRepo := repositories.NewBillParticularRepository(db)
+	billRepo := repositories.NewBillRepository(db)
+	billItemRepo := repositories.NewBillItemRepository(db)
+	billAssignmentRepo := repositories.NewBillAssignmentRepository(db)
 
 	// Initialize Services
 	eventService := services.NewEventService(eventRepo, registrationRepo)
@@ -38,9 +43,12 @@ func InitializeControllers(db *gorm.DB) {
 	documentService := services.NewDocumentService(documentRepo)
 	dashboardService := services.NewDashboardService(db)
 	mediaService := services.NewMediaService()
+	financeAccountService := services.NewFinanceAccountService(financeAccountRepo)
+	billParticularService := services.NewBillParticularService(billParticularRepo)
+	billService := services.NewBillService(billRepo, billItemRepo, billAssignmentRepo)
 
 	// Initialize Controllers
-	publicEventsController := controllers.NewPublicEventsController(eventRepo, registrationRepo, schoolRepo)
+	publicEventsController := controllers.NewPublicEventsController(eventRepo, registrationRepo, schoolRepo, db)
 
 	// Initialize Refactored Controllers
 	eventsController := controllers.NewEventsController(eventService, schoolService)
@@ -55,6 +63,9 @@ func InitializeControllers(db *gorm.DB) {
 	documentsController := controllers.NewDocumentsController(documentService)
 	dashboardController := controllers.NewDashboardController(dashboardService)
 	mediaController := controllers.NewMediaController(mediaService)
+	financeAccountsController := controllers.NewFinanceAccountsController(financeAccountService)
+	billParticularsController := controllers.NewBillParticularsController(billParticularService)
+	billsController := controllers.NewBillsController(billService)
 
 	// Register refactored controllers (these will override the old ones)
 	controllers.RegisterController("events", eventsController)
@@ -70,4 +81,7 @@ func InitializeControllers(db *gorm.DB) {
 	controllers.RegisterController("dashboard", dashboardController)
 	controllers.RegisterController("media", mediaController)
 	controllers.RegisterController("public-events", publicEventsController)
+	controllers.RegisterController("finance_accounts", financeAccountsController)
+	controllers.RegisterController("bill_particulars", billParticularsController)
+	controllers.RegisterController("bills", billsController)
 }
