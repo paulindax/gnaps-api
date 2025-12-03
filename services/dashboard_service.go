@@ -135,7 +135,7 @@ func (s *DashboardService) GetRegionalAdminStats(regionID string) fiber.Map {
 
 	// Count executives assigned to this region
 	s.db.Model(&models.Executive{}).
-		Where("JSON_CONTAINS(assigned_regions_ids, ?) AND is_deleted = ?", fmt.Sprintf("[%s]", regionID), 0).
+		Where("region_id = ? AND is_deleted = ?", regionID, false).
 		Count(&totalExecutives)
 
 	// Get zones with their school counts
@@ -198,7 +198,7 @@ func (s *DashboardService) GetZoneAdminStats(zoneID string) fiber.Map {
 
 	// Count executives assigned to this zone
 	s.db.Model(&models.Executive{}).
-		Where("JSON_CONTAINS(assigned_zone_ids, ?) AND is_deleted = ?", fmt.Sprintf("[%s]", zoneID), 0).
+		Where("zone_id = ? AND is_deleted = ?", zoneID, false).
 		Count(&totalExecutives)
 
 	// Get schools in this zone
@@ -291,45 +291,21 @@ func (s *DashboardService) GetSchoolUserStats(schoolID string) fiber.Map {
 
 // GetRegionalAdminStatsFromExecutive extracts region ID from executive and returns stats
 func (s *DashboardService) GetRegionalAdminStatsFromExecutive(executive *models.Executive) (fiber.Map, error) {
-	if executive.AssignedRegionsIds == nil {
-		return nil, fmt.Errorf("no regions assigned to this executive")
+	if executive.RegionId == nil || *executive.RegionId == 0 {
+		return nil, fmt.Errorf("no region assigned to this executive")
 	}
 
-	// Parse JSON array to get region IDs
-	var regionIDs []int64
-	if err := executive.AssignedRegionsIds.Scan(&regionIDs); err != nil {
-		return nil, fmt.Errorf("failed to parse assigned regions: %w", err)
-	}
-
-	if len(regionIDs) == 0 {
-		return nil, fmt.Errorf("no regions assigned to this executive")
-	}
-
-	// Use the first assigned region
-	// In production, you might want to handle multiple regions differently
-	regionID := fmt.Sprintf("%d", regionIDs[0])
+	regionID := fmt.Sprintf("%d", *executive.RegionId)
 	return s.GetRegionalAdminStats(regionID), nil
 }
 
 // GetZoneAdminStatsFromExecutive extracts zone ID from executive and returns stats
 func (s *DashboardService) GetZoneAdminStatsFromExecutive(executive *models.Executive) (fiber.Map, error) {
-	if executive.AssignedZoneIds == nil {
-		return nil, fmt.Errorf("no zones assigned to this executive")
+	if executive.ZoneId == nil || *executive.ZoneId == 0 {
+		return nil, fmt.Errorf("no zone assigned to this executive")
 	}
 
-	// Parse JSON array to get zone IDs
-	var zoneIDs []int64
-	if err := executive.AssignedZoneIds.Scan(&zoneIDs); err != nil {
-		return nil, fmt.Errorf("failed to parse assigned zones: %w", err)
-	}
-
-	if len(zoneIDs) == 0 {
-		return nil, fmt.Errorf("no zones assigned to this executive")
-	}
-
-	// Use the first assigned zone
-	// In production, you might want to handle multiple zones differently
-	zoneID := fmt.Sprintf("%d", zoneIDs[0])
+	zoneID := fmt.Sprintf("%d", *executive.ZoneId)
 	return s.GetZoneAdminStats(zoneID), nil
 }
 
@@ -341,28 +317,22 @@ func (s *DashboardService) GetOverview(userID uint, role string) fiber.Map {
 
 	// Filter news based on role
 	switch role {
-	case "regional_admin":
-		// Get executive's assigned regions
+	case "region_admin":
+		// Get executive's assigned region
 		var executive models.Executive
 		if err := s.db.Where("user_id = ? AND is_deleted = ?", userID, 0).First(&executive).Error; err == nil {
-			if executive.AssignedRegionsIds != nil {
-				var regionIDs []int64
-				if err := executive.AssignedRegionsIds.Scan(&regionIDs); err == nil && len(regionIDs) > 0 {
-					regionID := fmt.Sprintf("%d", regionIDs[0])
-					newsQuery = newsQuery.Where("JSON_CONTAINS(region_ids, ?)", fmt.Sprintf("[%s]", regionID))
-				}
+			if executive.RegionId != nil && *executive.RegionId > 0 {
+				regionID := fmt.Sprintf("%d", *executive.RegionId)
+				newsQuery = newsQuery.Where("JSON_CONTAINS(region_ids, ?)", fmt.Sprintf("[%s]", regionID))
 			}
 		}
 	case "zone_admin":
-		// Get executive's assigned zones
+		// Get executive's assigned zone
 		var executive models.Executive
 		if err := s.db.Where("user_id = ? AND is_deleted = ?", userID, 0).First(&executive).Error; err == nil {
-			if executive.AssignedZoneIds != nil {
-				var zoneIDs []int64
-				if err := executive.AssignedZoneIds.Scan(&zoneIDs); err == nil && len(zoneIDs) > 0 {
-					zoneID := fmt.Sprintf("%d", zoneIDs[0])
-					newsQuery = newsQuery.Where("JSON_CONTAINS(zone_ids, ?)", fmt.Sprintf("[%s]", zoneID))
-				}
+			if executive.ZoneId != nil && *executive.ZoneId > 0 {
+				zoneID := fmt.Sprintf("%d", *executive.ZoneId)
+				newsQuery = newsQuery.Where("JSON_CONTAINS(zone_ids, ?)", fmt.Sprintf("[%s]", zoneID))
 			}
 		}
 	}

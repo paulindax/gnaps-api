@@ -45,8 +45,13 @@ func (r *FinanceAccountRepository) List(filters map[string]interface{}, page, li
 		}
 	}
 
-	query.Model(&models.FinanceAccount{}).Count(&total)
+	// Count total - use Model to specify table for count
+	countQuery := query.Model(&models.FinanceAccount{})
+	if err := countQuery.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
 
+	// Fetch records with pagination
 	offset := (page - 1) * limit
 	err := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&accounts).Error
 

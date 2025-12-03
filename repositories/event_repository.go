@@ -86,7 +86,7 @@ func (r *EventRepository) CodeExists(code string) bool {
 func (r *EventRepository) GetRegisteredCount(eventID uint) int64 {
 	var count int64
 	r.db.Model(&models.EventRegistration{}).
-		Where("event_id = ? AND is_deleted = ?", eventID, false).
+		Where("event_id = ? AND COALESCE(is_deleted, false) = ?", eventID, false).
 		Count(&count)
 	return count
 }

@@ -39,6 +39,11 @@ func (e *ExecutivesController) Handle(action string, c *fiber.Ctx) error {
 func (e *ExecutivesController) list(c *fiber.Ctx) error {
 	// Parse filters from query params
 	filters := make(map[string]interface{})
+
+	// Search filter (searches name, email, executive_no)
+	if search := c.Query("search"); search != "" {
+		filters["search"] = search
+	}
 	if positionID := c.Query("position_id"); positionID != "" {
 		filters["position_id"] = positionID
 	}
@@ -62,6 +67,19 @@ func (e *ExecutivesController) list(c *fiber.Ctx) error {
 	}
 	if mobileNo := c.Query("mobile_no"); mobileNo != "" {
 		filters["mobile_no"] = mobileNo
+	}
+	// New filters for role-based management
+	if role := c.Query("role"); role != "" {
+		filters["role"] = role
+	}
+	if status := c.Query("status"); status != "" {
+		filters["status"] = status
+	}
+	if regionID := c.Query("region_id"); regionID != "" {
+		filters["region_id"] = regionID
+	}
+	if zoneID := c.Query("zone_id"); zoneID != "" {
+		filters["zone_id"] = zoneID
 	}
 
 	// Pagination
@@ -190,6 +208,22 @@ func (e *ExecutivesController) update(c *fiber.Ctx) error {
 	}
 	if updateData.PositionId != nil {
 		updates["position_id"] = *updateData.PositionId
+	}
+	// New fields for role-based management
+	if updateData.Role != nil {
+		updates["role"] = *updateData.Role
+	}
+	if updateData.RegionId != nil {
+		updates["region_id"] = *updateData.RegionId
+	}
+	if updateData.ZoneId != nil {
+		updates["zone_id"] = *updateData.ZoneId
+	}
+	if updateData.Status != nil {
+		updates["status"] = *updateData.Status
+	}
+	if updateData.Bio != nil {
+		updates["bio"] = *updateData.Bio
 	}
 
 	if err := e.executiveService.UpdateExecutive(uint(executiveId), updates); err != nil {

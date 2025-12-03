@@ -46,6 +46,7 @@ func InitializeControllers(db *gorm.DB) {
 	financeAccountService := services.NewFinanceAccountService(financeAccountRepo)
 	billParticularService := services.NewBillParticularService(billParticularRepo)
 	billService := services.NewBillService(billRepo, billItemRepo, billAssignmentRepo)
+	chatService := services.NewChatService()
 
 	// Initialize Controllers
 	publicEventsController := controllers.NewPublicEventsController(eventRepo, registrationRepo, schoolRepo, db)
@@ -66,6 +67,7 @@ func InitializeControllers(db *gorm.DB) {
 	financeAccountsController := controllers.NewFinanceAccountsController(financeAccountService)
 	billParticularsController := controllers.NewBillParticularsController(billParticularService)
 	billsController := controllers.NewBillsController(billService)
+	chatController := controllers.NewChatController(chatService)
 
 	// Register refactored controllers (these will override the old ones)
 	controllers.RegisterController("events", eventsController)
@@ -84,4 +86,5 @@ func InitializeControllers(db *gorm.DB) {
 	controllers.RegisterController("finance_accounts", financeAccountsController)
 	controllers.RegisterController("bill_particulars", billParticularsController)
 	controllers.RegisterController("bills", billsController)
+	controllers.RegisterController("chat", chatController)
 }

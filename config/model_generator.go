@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"os"
@@ -95,8 +96,55 @@ func toSnakeCase(s string) string {
 	return strings.ToLower(result.String())
 }
 
+// extractTransientFields reads an existing model file and extracts transient fields
+func extractTransientFields(filePath string) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		// File doesn't exist, no transient fields to preserve
+		return nil, nil
+	}
+	defer file.Close()
+
+	var transientFields []string
+	var inTransientSection bool
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+
+		// Start capturing when we see the transient fields comment
+		if strings.Contains(trimmed, "// Transient fields") {
+			inTransientSection = true
+			transientFields = append(transientFields, line)
+			continue
+		}
+
+		// Stop capturing when we hit the closing brace of the struct
+		if inTransientSection && trimmed == "}" {
+			break
+		}
+
+		// Capture lines in the transient section
+		if inTransientSection {
+			transientFields = append(transientFields, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return transientFields, nil
+}
+
 // GenerateModelFromTable generates a Go struct definition from a database table
-func GenerateModelFromTable(db *gorm.DB, tableName string) (string, error) {
+func GenerateModelFromTable(db *gorm.DB, tableName string, existingFilePath string) (string, error) {
+	// Extract transient fields from existing file if it exists
+	transientFields, err := extractTransientFields(existingFilePath)
+	if err != nil {
+		log.Printf("Warning: Could not extract transient fields from %s: %v", existingFilePath, err)
+	}
 	// Get column types using raw SQL to describe the table
 	rows, err := db.Raw(fmt.Sprintf("DESCRIBE %s", tableName)).Rows()
 	if err != nil {
@@ -106,6 +154,8 @@ func GenerateModelFromTable(db *gorm.DB, tableName string) (string, error) {
 
 	var fields []string
 	imports := make(map[string]bool)
+	needsGorm := false // Track if we need gorm import
+	needsTime := false // Track if we need time import
 
 	structName := toPascalCase(tableName)
 	structName = strings.TrimSuffix(structName, "s") // Remove trailing 's' for singular model name
@@ -113,9 +163,6 @@ func GenerateModelFromTable(db *gorm.DB, tableName string) (string, error) {
 	// Track standard gorm.Model fields separately
 	var standardFields []string
 	var customFields []string
-
-	// Always need time import for standard fields
-	imports["time"] = true
 
 	// Parse column information
 	for rows.Next() {
@@ -131,9 +178,9 @@ func GenerateModelFromTable(db *gorm.DB, tableName string) (string, error) {
 
 		goType := DatabaseToGoTypeMapper(dbType)
 
-		// Track required imports
+		// Track required imports based on actual field types
 		if strings.Contains(goType, "time.Time") {
-			imports["time"] = true
+			needsTime = true
 		}
 		if strings.Contains(goType, "datatypes.JSON") {
 			imports["gorm.io/datatypes"] = true
@@ -146,14 +193,18 @@ func GenerateModelFromTable(db *gorm.DB, tableName string) (string, error) {
 		}
 		if columnName == "created_at" {
 			standardFields = append(standardFields, "\tCreatedAt time.Time      `json:\"created_at\"`")
+			needsTime = true
 			continue
 		}
 		if columnName == "updated_at" {
 			standardFields = append(standardFields, "\tUpdatedAt time.Time      `json:\"updated_at\"`")
+			needsTime = true
 			continue
 		}
 		if columnName == "deleted_at" {
 			standardFields = append(standardFields, "\tDeletedAt gorm.DeletedAt `json:\"deleted_at,omitempty\" gorm:\"index\"`")
+			needsGorm = true // We need gorm import for gorm.DeletedAt
+			needsTime = true
 			continue
 		}
 
@@ -169,10 +220,18 @@ func GenerateModelFromTable(db *gorm.DB, tableName string) (string, error) {
 
 	structBuilder.WriteString("package models\n\n")
 
-	// Add imports
-	if len(imports) > 0 || len(fields) > 0 {
+	// Add imports only if needed
+	if needsGorm || needsTime || len(imports) > 0 {
 		structBuilder.WriteString("import (\n")
-		structBuilder.WriteString("\t\"gorm.io/gorm\"\n")
+		// Only import gorm if we have deleted_at field
+		if needsGorm {
+			structBuilder.WriteString("\t\"gorm.io/gorm\"\n")
+		}
+		// Only import time if we have time.Time fields
+		if needsTime {
+			structBuilder.WriteString("\t\"time\"\n")
+		}
+		// Import other packages
 		for imp := range imports {
 			structBuilder.WriteString(fmt.Sprintf("\t\"%s\"\n", imp))
 		}
@@ -197,6 +256,14 @@ func GenerateModelFromTable(db *gorm.DB, tableName string) (string, error) {
 	// If we don't have standard fields but have custom fields, no extra line needed
 	if !hasStandardFields && len(fields) > 0 {
 		// Fields already written, no extra spacing needed
+	}
+
+	// Add preserved transient fields if any exist
+	if len(transientFields) > 0 {
+		structBuilder.WriteString("\n")
+		for _, field := range transientFields {
+			structBuilder.WriteString(field + "\n")
+		}
 	}
 
 	structBuilder.WriteString("}\n\n")
@@ -241,17 +308,18 @@ func GenerateModelsMiddleware(db *gorm.DB, modelsDir string) error {
 	for _, tableName := range tables {
 		log.Printf("Generating model for table: %s\n", tableName)
 
-		structCode, err := GenerateModelFromTable(db, tableName)
-		if err != nil {
-			log.Printf("Error generating model for table %s: %v\n", tableName, err)
-			continue
-		}
-
-		// Determine file name
+		// Determine file name and path first
 		structName := toPascalCase(tableName)
 		structName = strings.TrimSuffix(structName, "s")
 		fileName := fmt.Sprintf("%s.go", structName)
 		filePath := filepath.Join(modelsDir, fileName)
+
+		// Generate model, preserving any existing transient fields
+		structCode, err := GenerateModelFromTable(db, tableName, filePath)
+		if err != nil {
+			log.Printf("Error generating model for table %s: %v\n", tableName, err)
+			continue
+		}
 
 		// Write to file
 		if err := os.WriteFile(filePath, []byte(structCode), 0644); err != nil {

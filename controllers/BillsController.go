@@ -238,6 +238,42 @@ func (b *BillsController) getItems(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid Bill ID"})
 	}
 
+	// Check if pagination parameters are provided
+	pageStr := c.Query("page")
+	limitStr := c.Query("limit")
+	search := c.Query("search")
+
+	// If pagination parameters are provided, use pagination
+	if pageStr != "" || limitStr != "" {
+		page, err := strconv.Atoi(pageStr)
+		if err != nil || page < 1 {
+			page = 1
+		}
+
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil || limit < 1 {
+			limit = 10
+		}
+
+		items, total, err := b.billService.GetBillItemsByBillIDWithPagination(uint(billId), page, limit, search)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"error":   "Failed to retrieve bill items",
+				"details": err.Error(),
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"data": items,
+			"pagination": fiber.Map{
+				"page":  page,
+				"limit": limit,
+				"total": total,
+			},
+		})
+	}
+
+	// Default behavior without pagination for backward compatibility
 	items, err := b.billService.GetBillItemsByBillID(uint(billId))
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{

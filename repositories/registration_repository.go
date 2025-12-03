@@ -20,7 +20,7 @@ func (r *RegistrationRepository) Create(registration *models.EventRegistration) 
 
 func (r *RegistrationRepository) FindByID(id uint) (*models.EventRegistration, error) {
 	var registration models.EventRegistration
-	err := r.db.Where("id = ? AND is_deleted = ?", id, false).First(&registration).Error
+	err := r.db.Where("id = ? AND COALESCE(is_deleted, false) = ?", id, false).First(&registration).Error
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +30,7 @@ func (r *RegistrationRepository) FindByID(id uint) (*models.EventRegistration, e
 func (r *RegistrationRepository) SchoolAlreadyRegistered(eventID uint, schoolID int64) (bool, error) {
 	var count int64
 	err := r.db.Model(&models.EventRegistration{}).
-		Where("event_id = ? AND school_id = ? AND is_deleted = ?", eventID, schoolID, false).
+		Where("event_id = ? AND school_id = ? AND COALESCE(is_deleted, false) = ?", eventID, schoolID, false).
 		Count(&count).Error
 	return count > 0, err
 }
@@ -38,7 +38,7 @@ func (r *RegistrationRepository) SchoolAlreadyRegistered(eventID uint, schoolID 
 func (r *RegistrationRepository) CountByEvent(eventID uint) (int64, error) {
 	var count int64
 	err := r.db.Model(&models.EventRegistration{}).
-		Where("event_id = ? AND is_deleted = ?", eventID, false).
+		Where("event_id = ? AND COALESCE(is_deleted, false) = ?", eventID, false).
 		Count(&count).Error
 	return count, err
 }
@@ -48,7 +48,7 @@ func (r *RegistrationRepository) ListByEvent(eventID uint, page, limit int) ([]m
 	var total int64
 
 	query := r.db.Model(&models.EventRegistration{}).
-		Where("event_id = ? AND is_deleted = ?", eventID, false)
+		Where("event_id = ? AND COALESCE(is_deleted, false) = ?", eventID, false)
 
 	query.Count(&total)
 
@@ -63,7 +63,7 @@ func (r *RegistrationRepository) ListByUser(userID uint, page, limit int) ([]mod
 	var total int64
 
 	query := r.db.Model(&models.EventRegistration{}).
-		Where("registered_by = ? AND is_deleted = ?", userID, false)
+		Where("registered_by = ? AND COALESCE(is_deleted, false) = ?", userID, false)
 
 	query.Count(&total)
 

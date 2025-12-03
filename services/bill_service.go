@@ -81,6 +81,10 @@ func (s *BillService) GetBillItemsByBillID(billId uint) ([]models.BillItem, erro
 	return s.billItemRepo.FindByBillID(billId)
 }
 
+func (s *BillService) GetBillItemsByBillIDWithPagination(billId uint, page, limit int, search string) ([]models.BillItem, int64, error) {
+	return s.billItemRepo.FindByBillIDWithPagination(billId, page, limit, search)
+}
+
 func (s *BillService) CreateBillItem(billItem *models.BillItem) error {
 	// Validate required fields
 	if billItem.BillId == nil {

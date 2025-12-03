@@ -14,7 +14,7 @@ type EventRegistration struct {
 
 	EventId int64 `json:"event_id" gorm:"column:event_id"`
 	SchoolId int64 `json:"school_id" gorm:"column:school_id"`
-	RegisteredBy *int64 `json:"registered_by,omitempty" gorm:"column:registered_by"`
+	RegisteredBy *int64 `json:"registered_by" gorm:"column:registered_by"`
 	PaymentStatus *string `json:"payment_status" gorm:"column:payment_status"`
 	PaymentReference *string `json:"payment_reference" gorm:"column:payment_reference"`
 	PaymentMethod *string `json:"payment_method" gorm:"column:payment_method"`
