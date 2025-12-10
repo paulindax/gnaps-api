@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"gnaps-api/models"
+	"gnaps-api/utils"
 
 	"gorm.io/gorm"
 )
@@ -89,4 +90,112 @@ func (r *EventRepository) GetRegisteredCount(eventID uint) int64 {
 		Where("event_id = ? AND COALESCE(is_deleted, false) = ?", eventID, false).
 		Count(&count)
 	return count
+}
+
+// GetBillName retrieves the bill name for a given bill_id
+func (r *EventRepository) GetBillName(billID int64) *string {
+	var bill struct {
+		Name *string `gorm:"column:name"`
+	}
+	err := r.db.Table("bills").Where("id = ? AND is_deleted = ?", billID, false).First(&bill).Error
+	if err != nil {
+		return nil
+	}
+	return bill.Name
+}
+
+// ============================================
+// Owner-based methods for data filtering
+// ============================================
+
+// CreateWithOwner creates a new event with owner fields automatically set
+// Returns ErrSystemAdminCannotWrite if system_admin tries to create owner-based data
+func (r *EventRepository) CreateWithOwner(event *models.Event, ownerCtx *utils.OwnerContext) error {
+	if err := CanWrite(ownerCtx); err != nil {
+		return err
+	}
+
+	if ownerCtx != nil && ownerCtx.IsValid() {
+		ownerType, ownerID := ownerCtx.GetOwnerValues()
+		event.SetOwner(ownerType, ownerID)
+	}
+	return r.db.Create(event).Error
+}
+
+// FindByIDWithOwner retrieves an event by ID with owner filtering
+func (r *EventRepository) FindByIDWithOwner(id uint, ownerCtx *utils.OwnerContext) (*models.Event, error) {
+	var event models.Event
+	query := r.db.Where("id = ? AND is_deleted = ?", id, false)
+	query = ApplyOwnerFilterToQuery(query, ownerCtx)
+
+	err := query.First(&event).Error
+	if err != nil {
+		return nil, err
+	}
+	return &event, nil
+}
+
+// ListWithOwner retrieves events with filters, pagination, and owner filtering
+func (r *EventRepository) ListWithOwner(filters map[string]interface{}, page, limit int, ownerCtx *utils.OwnerContext) ([]models.Event, int64, error) {
+	var events []models.Event
+	var total int64
+
+	query := r.db.Model(&models.Event{}).Where("is_deleted = ?", false)
+	query = ApplyOwnerFilterToQuery(query, ownerCtx)
+
+	// Date range filters - process and remove before general filter loop
+	if fromDate, ok := filters["from_date"]; ok {
+		query = query.Where("start_date >= ?", fromDate)
+		delete(filters, "from_date")
+	}
+	if toDate, ok := filters["to_date"]; ok {
+		query = query.Where("start_date <= ?", toDate)
+		delete(filters, "to_date")
+	}
+
+	// Apply other filters
+	for key, value := range filters {
+		query = query.Where(key+" = ?", value)
+	}
+
+	query.Count(&total)
+
+	offset := (page - 1) * limit
+	err := query.Offset(offset).Limit(limit).Order("start_date DESC").Find(&events).Error
+
+	return events, total, err
+}
+
+// UpdateWithOwner updates an event with owner verification
+// Returns ErrSystemAdminCannotWrite if system_admin tries to update
+func (r *EventRepository) UpdateWithOwner(id uint, updates map[string]interface{}, ownerCtx *utils.OwnerContext) error {
+	if err := CanWrite(ownerCtx); err != nil {
+		return err
+	}
+
+	query := r.db.Model(&models.Event{}).Where("id = ?", id)
+	query = ApplyOwnerFilterToQuery(query, ownerCtx)
+
+	result := query.Updates(updates)
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return result.Error
+}
+
+// DeleteWithOwner soft deletes an event with owner verification
+// Returns ErrSystemAdminCannotWrite if system_admin tries to delete
+func (r *EventRepository) DeleteWithOwner(id uint, ownerCtx *utils.OwnerContext) error {
+	if err := CanWrite(ownerCtx); err != nil {
+		return err
+	}
+
+	query := r.db.Model(&models.Event{}).Where("id = ?", id)
+	query = ApplyOwnerFilterToQuery(query, ownerCtx)
+
+	result := query.Update("is_deleted", true)
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return result.Error
 }

@@ -86,3 +86,19 @@ func (r *RegistrationRepository) UpdatePaymentStatus(id uint, status, reference 
 func (r *RegistrationRepository) Delete(id uint) error {
 	return r.db.Model(&models.EventRegistration{}).Where("id = ?", id).Update("is_deleted", true).Error
 }
+
+func (r *RegistrationRepository) FindByEventAndSchool(eventID uint, schoolID int64) (*models.EventRegistration, error) {
+	var registration models.EventRegistration
+	// Use Unscoped() to bypass GORM's automatic soft delete filtering
+	// This ensures we find any existing registration (even if soft-deleted) to prevent duplicate constraint violations
+	err := r.db.Unscoped().Where("event_id = ? AND school_id = ?", eventID, schoolID).First(&registration).Error
+	if err != nil {
+		return nil, err
+	}
+	return &registration, nil
+}
+
+func (r *RegistrationRepository) Update(id uint, updates map[string]interface{}) error {
+	// Use Unscoped() to allow updating soft-deleted records (for reactivation)
+	return r.db.Unscoped().Model(&models.EventRegistration{}).Where("id = ?", id).Updates(updates).Error
+}

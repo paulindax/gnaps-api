@@ -4,6 +4,7 @@ import (
 	"errors"
 	"gnaps-api/models"
 	"gnaps-api/repositories"
+	"gnaps-api/utils"
 )
 
 type GroupService struct {
@@ -74,4 +75,53 @@ func (s *GroupService) DeleteGroup(id uint) error {
 	}
 
 	return s.groupRepo.Delete(id)
+}
+
+// ============================================
+// Owner-based methods for data filtering
+// ============================================
+
+func (s *GroupService) GetGroupByIDWithOwner(id uint, ownerCtx *utils.OwnerContext) (*models.SchoolGroup, error) {
+	return s.groupRepo.FindByIDWithOwner(id, ownerCtx)
+}
+
+func (s *GroupService) ListGroupsWithOwner(filters map[string]interface{}, page, limit int, ownerCtx *utils.OwnerContext) ([]models.SchoolGroup, int64, error) {
+	return s.groupRepo.ListWithOwner(filters, page, limit, ownerCtx)
+}
+
+func (s *GroupService) CreateGroupWithOwner(group *models.SchoolGroup, ownerCtx *utils.OwnerContext) error {
+	// Validate required fields
+	if group.Name == nil || *group.Name == "" {
+		return errors.New("name is required")
+	}
+
+	// Verify zone exists if zone_id is provided
+	if group.ZoneId != nil {
+		exists, err := s.groupRepo.VerifyZoneExists(*group.ZoneId)
+		if err != nil || !exists {
+			return errors.New("invalid zone ID - Zone does not exist")
+		}
+	}
+
+	// Set defaults
+	group.IsDeleted = false
+
+	return s.groupRepo.CreateWithOwner(group, ownerCtx)
+}
+
+func (s *GroupService) UpdateGroupWithOwner(id uint, updates map[string]interface{}, ownerCtx *utils.OwnerContext) error {
+	// Verify zone exists if zone_id is being changed
+	if zoneId, ok := updates["zone_id"]; ok {
+		zoneIdVal := zoneId.(int64)
+		exists, err := s.groupRepo.VerifyZoneExists(zoneIdVal)
+		if err != nil || !exists {
+			return errors.New("invalid zone ID - Zone does not exist")
+		}
+	}
+
+	return s.groupRepo.UpdateWithOwner(id, updates, ownerCtx)
+}
+
+func (s *GroupService) DeleteGroupWithOwner(id uint, ownerCtx *utils.OwnerContext) error {
+	return s.groupRepo.DeleteWithOwner(id, ownerCtx)
 }

@@ -5,15 +5,20 @@ import (
 	"fmt"
 	"gnaps-api/models"
 	"gnaps-api/repositories"
+	"gnaps-api/utils"
 	"time"
 )
 
 type ExecutiveService struct {
 	executiveRepo *repositories.ExecutiveRepository
+	userRepo      *repositories.UserRepository
 }
 
-func NewExecutiveService(executiveRepo *repositories.ExecutiveRepository) *ExecutiveService {
-	return &ExecutiveService{executiveRepo: executiveRepo}
+func NewExecutiveService(executiveRepo *repositories.ExecutiveRepository, userRepo *repositories.UserRepository) *ExecutiveService {
+	return &ExecutiveService{
+		executiveRepo: executiveRepo,
+		userRepo:      userRepo,
+	}
 }
 
 func (s *ExecutiveService) GetExecutiveByID(id uint) (*models.Executive, error) {
@@ -117,6 +122,28 @@ func (s *ExecutiveService) CreateExecutive(executive *models.Executive) error {
 		executive.Status = &activeStatus
 	}
 
+	// Create user account for the executive
+	mobileNo := ""
+	if executive.MobileNo != nil {
+		mobileNo = *executive.MobileNo
+	}
+
+	user, err := s.userRepo.CreateUserForExecutive(
+		*executive.FirstName,
+		*executive.LastName,
+		*executive.Email,
+		mobileNo,
+		*executive.Role,
+		*executive.ExecutiveNo, // Password will be executive_no + "123"
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create user account: %v", err)
+	}
+
+	// Set the user_id on the executive
+	userID := int64(user.ID)
+	executive.UserId = &userID
+
 	return s.executiveRepo.Create(executive)
 }
 
@@ -208,14 +235,72 @@ func (s *ExecutiveService) UpdateExecutive(id uint, updates map[string]interface
 		}
 	}
 
+	// Update the associated user if executive has a user_id
+	if executive.UserId != nil && *executive.UserId > 0 {
+		userUpdates := make(map[string]interface{})
+
+		// Sync relevant fields to user
+		if firstName, ok := updates["first_name"]; ok {
+			userUpdates["first_name"] = firstName
+		}
+		if lastName, ok := updates["last_name"]; ok {
+			userUpdates["last_name"] = lastName
+		}
+		if email, ok := updates["email"]; ok {
+			userUpdates["email"] = email
+		}
+		if mobileNo, ok := updates["mobile_no"]; ok {
+			userUpdates["mobile_no"] = mobileNo
+		}
+		if role, ok := updates["role"]; ok {
+			userUpdates["role"] = role
+		}
+
+		// Only update user if there are changes to sync
+		if len(userUpdates) > 0 {
+			if err := s.userRepo.Update(uint(*executive.UserId), userUpdates); err != nil {
+				return fmt.Errorf("failed to update user account: %v", err)
+			}
+		}
+	}
+
 	return s.executiveRepo.Update(id, updates)
 }
 
 func (s *ExecutiveService) DeleteExecutive(id uint) error {
-	_, err := s.executiveRepo.FindByID(id)
+	executive, err := s.executiveRepo.FindByID(id)
 	if err != nil {
 		return errors.New("executive not found")
 	}
 
+	// Also soft delete the associated user
+	if executive.UserId != nil && *executive.UserId > 0 {
+		if err := s.userRepo.Delete(uint(*executive.UserId)); err != nil {
+			return fmt.Errorf("failed to delete user account: %v", err)
+		}
+	}
+
 	return s.executiveRepo.Delete(id)
+}
+
+// ============================================
+// Role-Based Filtering Methods
+// ============================================
+
+// ListExecutivesWithRole returns executives filtered by role-based access
+func (s *ExecutiveService) ListExecutivesWithRole(filters map[string]interface{}, page, limit int, ownerCtx *utils.OwnerContext) ([]models.Executive, int64, error) {
+	regionID := ownerCtx.GetRegionIDFilter()
+	zoneID := ownerCtx.GetZoneIDFilter()
+	return s.executiveRepo.ListWithRoleFilter(filters, page, limit, regionID, zoneID)
+}
+
+// GetExecutiveByIDWithRole returns an executive if accessible by the user's role
+func (s *ExecutiveService) GetExecutiveByIDWithRole(id uint, ownerCtx *utils.OwnerContext) (*models.Executive, error) {
+	regionID := ownerCtx.GetRegionIDFilter()
+	zoneID := ownerCtx.GetZoneIDFilter()
+	executive, err := s.executiveRepo.FindByIDWithRoleFilter(id, regionID, zoneID)
+	if err != nil {
+		return nil, errors.New("executive not found or access denied")
+	}
+	return executive, nil
 }

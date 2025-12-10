@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"gnaps-api/models"
 	"gnaps-api/repositories"
+	"gnaps-api/utils"
 
 	"gorm.io/datatypes"
 )
@@ -67,7 +68,7 @@ func (s *NewsService) GetAccessibleEntities(userId uint, userRole string) (regio
 		// These roles can see all news
 		return nil, nil, nil, nil, nil
 
-	case "regional_admin":
+	case "region_admin":
 		// Get region_id from user properties
 		if regionId, ok := userProps["region_id"].(float64); ok {
 			regionIds = append(regionIds, int64(regionId))
@@ -97,7 +98,7 @@ func (s *NewsService) GetAccessibleEntities(userId uint, userRole string) (regio
 			}
 		}
 
-	case "school_user":
+	case "school_admin":
 		// Get school_id from user properties
 		if schoolId, ok := userProps["school_id"].(float64); ok {
 			schoolIds = append(schoolIds, int64(schoolId))
@@ -167,7 +168,7 @@ func (s *NewsService) ValidateTargeting(userId uint, userRole string, newsItem *
 		// Can target any regions, zones, groups, schools
 		return nil
 
-	case "regional_admin":
+	case "region_admin":
 		// Can only target their region and zones/schools under it
 		userRegionId, ok := userProps["region_id"].(float64)
 		if !ok {
@@ -331,7 +332,7 @@ func (s *NewsService) GetNewsByID(id uint, userId uint, userRole string) (*model
 // CreateNews creates a new news item with validation
 func (s *NewsService) CreateNews(news *models.New, userId uint, userRole string) error {
 	// Only admins can create news
-	if userRole == "school_user" {
+	if userRole == "school_admin" {
 		return errors.New("you do not have permission to create news")
 	}
 
@@ -371,7 +372,7 @@ func (s *NewsService) CreateNews(news *models.New, userId uint, userRole string)
 // UpdateNews updates an existing news item with validation
 func (s *NewsService) UpdateNews(id uint, updates map[string]interface{}, userId uint, userRole string) error {
 	// Only admins can update news
-	if userRole == "school_user" {
+	if userRole == "school_admin" {
 		return errors.New("you do not have permission to update news")
 	}
 
@@ -405,7 +406,7 @@ func (s *NewsService) UpdateNews(id uint, updates map[string]interface{}, userId
 // DeleteNews soft deletes a news item
 func (s *NewsService) DeleteNews(id uint, userRole string) error {
 	// Only admins can delete news
-	if userRole == "school_user" {
+	if userRole == "school_admin" {
 		return errors.New("you do not have permission to delete news")
 	}
 
@@ -497,4 +498,64 @@ func (s *NewsService) ApproveComment(id uint) error {
 	}
 
 	return s.commentRepo.Approve(id)
+}
+
+// ==================== OWNER-BASED NEWS OPERATIONS ====================
+// These methods use the OwnerContext for data filtering based on executive roles
+
+// ListNewsWithOwner retrieves news filtered by owner context
+func (s *NewsService) ListNewsWithOwner(filters map[string]interface{}, page, limit int, ownerCtx *utils.OwnerContext) ([]models.New, int64, error) {
+	return s.newsRepo.ListWithOwner(filters, page, limit, ownerCtx)
+}
+
+// GetNewsByIDWithOwner retrieves a single news item with owner verification
+func (s *NewsService) GetNewsByIDWithOwner(id uint, ownerCtx *utils.OwnerContext) (*models.New, error) {
+	newsItem, err := s.newsRepo.FindByIDWithOwner(id, ownerCtx)
+	if err != nil {
+		return nil, errors.New("news not found or access denied")
+	}
+	return newsItem, nil
+}
+
+// CreateNewsWithOwner creates a news item with owner fields automatically set
+func (s *NewsService) CreateNewsWithOwner(news *models.New, ownerCtx *utils.OwnerContext) error {
+	// Validate required fields
+	if news.Title == nil || *news.Title == "" {
+		return errors.New("title is required")
+	}
+	if news.Content == nil || *news.Content == "" {
+		return errors.New("content is required")
+	}
+
+	// Set author from owner context
+	if ownerCtx != nil {
+		authorId := int64(ownerCtx.UserID)
+		news.AuthorId = &authorId
+	}
+
+	// Set default values
+	falseVal := false
+	news.IsDeleted = &falseVal
+
+	if news.Status == nil {
+		defaultStatus := "draft"
+		news.Status = &defaultStatus
+	}
+
+	if news.Featured == nil {
+		news.Featured = &falseVal
+	}
+
+	// Create with owner context - owner_type and owner_id are set automatically
+	return s.newsRepo.CreateWithOwner(news, ownerCtx)
+}
+
+// UpdateNewsWithOwner updates a news item with owner verification
+func (s *NewsService) UpdateNewsWithOwner(id uint, updates map[string]interface{}, ownerCtx *utils.OwnerContext) error {
+	return s.newsRepo.UpdateWithOwner(id, updates, ownerCtx)
+}
+
+// DeleteNewsWithOwner soft deletes a news item with owner verification
+func (s *NewsService) DeleteNewsWithOwner(id uint, ownerCtx *utils.OwnerContext) error {
+	return s.newsRepo.DeleteWithOwner(id, ownerCtx)
 }

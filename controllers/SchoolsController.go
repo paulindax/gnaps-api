@@ -32,12 +32,20 @@ func (s *SchoolsController) Handle(action string, c *fiber.Ctx) error {
 		return s.update(c)
 	case "delete":
 		return s.delete(c)
+	case "next_member_no":
+		return s.nextMemberNo(c)
 	default:
 		return utils.NotFoundResponse(c, fmt.Sprintf("unknown action %s", action))
 	}
 }
 
 func (s *SchoolsController) list(c *fiber.Ctx) error {
+	// Get owner context for role-based filtering
+	ownerCtx := utils.GetOwnerContext(c)
+	if ownerCtx == nil {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized - owner context not found"})
+	}
+
 	// Parse filters from query params
 	filters := make(map[string]interface{})
 	if zoneID := c.Query("zone_id"); zoneID != "" {
@@ -55,12 +63,15 @@ func (s *SchoolsController) list(c *fiber.Ctx) error {
 	if mobileNo := c.Query("mobile_no"); mobileNo != "" {
 		filters["mobile_no"] = mobileNo
 	}
+	if schoolGroupID := c.Query("school_group_id"); schoolGroupID != "" {
+		filters["school_group_id"] = schoolGroupID
+	}
 
 	// Pagination
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "10"))
 
-	schools, total, err := s.schoolService.ListSchools(filters, page, limit)
+	schools, total, err := s.schoolService.ListSchoolsWithRole(filters, page, limit, ownerCtx)
 	if err != nil {
 		return utils.ServerErrorResponse(c, "Failed to retrieve schools")
 	}
@@ -76,6 +87,12 @@ func (s *SchoolsController) list(c *fiber.Ctx) error {
 }
 
 func (s *SchoolsController) show(c *fiber.Ctx) error {
+	// Get owner context for role-based filtering
+	ownerCtx := utils.GetOwnerContext(c)
+	if ownerCtx == nil {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized - owner context not found"})
+	}
+
 	id := c.Params("id")
 	if id == "" {
 		id = c.Query("id")
@@ -90,7 +107,7 @@ func (s *SchoolsController) show(c *fiber.Ctx) error {
 		return utils.ValidationErrorResponse(c, "Invalid ID")
 	}
 
-	school, err := s.schoolService.GetSchoolByID(uint(schoolId))
+	school, err := s.schoolService.GetSchoolByIDWithRole(uint(schoolId), ownerCtx)
 	if err != nil {
 		return utils.NotFoundResponse(c, err.Error())
 	}
@@ -172,6 +189,9 @@ func (s *SchoolsController) update(c *fiber.Ctx) error {
 	if updateData.UserId != nil {
 		updates["user_id"] = updateData.UserId
 	}
+	if updateData.SchoolGroupIds != nil {
+		updates["school_group_ids"] = updateData.SchoolGroupIds
+	}
 
 	if err := s.schoolService.UpdateSchool(uint(schoolId), updates); err != nil {
 		errMsg := err.Error()
@@ -214,4 +234,25 @@ func (s *SchoolsController) delete(c *fiber.Ctx) error {
 	}
 
 	return utils.SuccessResponse(c, nil, "School deleted successfully")
+}
+
+func (s *SchoolsController) nextMemberNo(c *fiber.Ctx) error {
+	zoneID := c.Query("zone_id")
+	if zoneID == "" {
+		return utils.ValidationErrorResponse(c, "zone_id is required")
+	}
+
+	zoneIdInt, err := strconv.ParseInt(zoneID, 10, 64)
+	if err != nil {
+		return utils.ValidationErrorResponse(c, "Invalid zone_id")
+	}
+
+	memberNo, err := s.schoolService.GetNextMemberNoForZone(zoneIdInt)
+	if err != nil {
+		return utils.ServerErrorResponse(c, "Failed to generate member number")
+	}
+
+	return c.JSON(fiber.Map{
+		"member_no": memberNo,
+	})
 }

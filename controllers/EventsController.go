@@ -127,7 +127,10 @@ func (e *EventsController) list(c *fiber.Ctx) error {
 		filters["to_date"] = toDate
 	}
 
-	events, total, err := e.eventService.ListEvents(filters, page, limit)
+	// Get owner context for filtering
+	ownerCtx := utils.GetOwnerContext(c)
+
+	events, total, err := e.eventService.ListEventsWithOwner(filters, page, limit, ownerCtx)
 	if err != nil {
 		return utils.ServerErrorResponse(c, "Failed to fetch events")
 	}
@@ -149,7 +152,10 @@ func (e *EventsController) show(c *fiber.Ctx) error {
 		return utils.ValidationErrorResponse(c, "Invalid event ID")
 	}
 
-	event, err := e.eventService.GetEventByID(uint(eventId))
+	// Get owner context for filtering
+	ownerCtx := utils.GetOwnerContext(c)
+
+	event, err := e.eventService.GetEventByIDWithOwner(uint(eventId), ownerCtx)
 	if err != nil {
 		return utils.NotFoundResponse(c, "Event not found")
 	}
@@ -166,7 +172,13 @@ func (e *EventsController) create(c *fiber.Ctx) error {
 		return utils.ValidationErrorResponse(c, "Invalid request body")
 	}
 
-	if err := e.eventService.CreateEvent(&event, userId); err != nil {
+	// Get owner context for write permission check
+	ownerCtx := utils.GetOwnerContext(c)
+
+	if err := e.eventService.CreateEventWithOwner(&event, userId, ownerCtx); err != nil {
+		if err.Error() == "system admin cannot modify data in owner-based tables (view only)" {
+			return utils.ForbiddenResponse(c, err.Error())
+		}
 		return utils.ServerErrorResponse(c, "Failed to create event")
 	}
 
@@ -223,13 +235,26 @@ func (e *EventsController) update(c *fiber.Ctx) error {
 	if updates.ImageUrl != nil {
 		updateMap["image_url"] = updates.ImageUrl
 	}
+	// Handle bill_id - check raw body to allow setting to null
+	var rawBody map[string]interface{}
+	if err := c.BodyParser(&rawBody); err == nil {
+		if _, hasBillId := rawBody["bill_id"]; hasBillId {
+			updateMap["bill_id"] = updates.BillId // Can be nil to remove association
+		}
+	}
 
-	if err := e.eventService.UpdateEvent(uint(eventId), updateMap); err != nil {
+	// Get owner context for write permission check
+	ownerCtx := utils.GetOwnerContext(c)
+
+	if err := e.eventService.UpdateEventWithOwner(uint(eventId), updateMap, ownerCtx); err != nil {
+		if err.Error() == "system admin cannot modify data in owner-based tables (view only)" {
+			return utils.ForbiddenResponse(c, err.Error())
+		}
 		return utils.ServerErrorResponse(c, err.Error())
 	}
 
 	// Get updated event
-	event, _ := e.eventService.GetEventByID(uint(eventId))
+	event, _ := e.eventService.GetEventByIDWithOwner(uint(eventId), ownerCtx)
 	return utils.SuccessResponse(c, event, "Event updated successfully")
 }
 
@@ -240,7 +265,13 @@ func (e *EventsController) delete(c *fiber.Ctx) error {
 		return utils.ValidationErrorResponse(c, "Invalid event ID")
 	}
 
-	if err := e.eventService.DeleteEvent(uint(eventId)); err != nil {
+	// Get owner context for write permission check
+	ownerCtx := utils.GetOwnerContext(c)
+
+	if err := e.eventService.DeleteEventWithOwner(uint(eventId), ownerCtx); err != nil {
+		if err.Error() == "system admin cannot modify data in owner-based tables (view only)" {
+			return utils.ForbiddenResponse(c, err.Error())
+		}
 		return utils.ServerErrorResponse(c, "Failed to delete event")
 	}
 
@@ -279,12 +310,13 @@ func (e *EventsController) getEventRegistrations(c *fiber.Ctx, eventId uint) err
 		return utils.ServerErrorResponse(c, "Failed to fetch registrations")
 	}
 
-	// Populate school names
+	// Populate school names and member numbers
 	for i := range registrations {
 		if registrations[i].SchoolId != 0 {
 			school, err := e.schoolService.GetSchoolByID(uint(registrations[i].SchoolId))
 			if err == nil {
 				registrations[i].SchoolName = &school.Name
+				registrations[i].SchoolMemberNo = &school.MemberNo
 			}
 		}
 	}
@@ -310,7 +342,7 @@ func (e *EventsController) getMyRegistrations(c *fiber.Ctx) error {
 		return utils.ServerErrorResponse(c, "Failed to fetch registrations")
 	}
 
-	// Populate event titles and school names
+	// Populate event titles, school names and member numbers
 	for i := range registrations {
 		if registrations[i].EventId != 0 {
 			event, err := e.eventService.GetEventByID(uint(registrations[i].EventId))
@@ -322,6 +354,7 @@ func (e *EventsController) getMyRegistrations(c *fiber.Ctx) error {
 			school, err := e.schoolService.GetSchoolByID(uint(registrations[i].SchoolId))
 			if err == nil {
 				registrations[i].SchoolName = &school.Name
+				registrations[i].SchoolMemberNo = &school.MemberNo
 			}
 		}
 	}

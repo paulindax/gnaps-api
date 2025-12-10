@@ -6,6 +6,7 @@ import (
 	"errors"
 	"gnaps-api/models"
 	"gnaps-api/repositories"
+	"gnaps-api/utils"
 	"strings"
 	"time"
 )
@@ -43,7 +44,7 @@ func (s *EventService) CreateEvent(event *models.Event, userId uint) error {
 	return s.eventRepo.Create(event)
 }
 
-// GetEventByID retrieves an event with registration count
+// GetEventByID retrieves an event with registration count and bill name
 func (s *EventService) GetEventByID(id uint) (*models.Event, error) {
 	event, err := s.eventRepo.FindByID(id)
 	if err != nil {
@@ -52,6 +53,12 @@ func (s *EventService) GetEventByID(id uint) (*models.Event, error) {
 
 	// Add registered count
 	event.RegisteredCount = int(s.eventRepo.GetRegisteredCount(id))
+
+	// Populate bill name if bill_id exists
+	if event.BillId != nil && *event.BillId > 0 {
+		event.BillName = s.eventRepo.GetBillName(*event.BillId)
+	}
+
 	return event, nil
 }
 
@@ -64,6 +71,12 @@ func (s *EventService) GetEventByCode(code string) (*models.Event, error) {
 
 	// Add registered count
 	event.RegisteredCount = int(s.eventRepo.GetRegisteredCount(event.ID))
+
+	// Populate bill name if bill_id exists
+	if event.BillId != nil && *event.BillId > 0 {
+		event.BillName = s.eventRepo.GetBillName(*event.BillId)
+	}
+
 	return event, nil
 }
 
@@ -74,9 +87,13 @@ func (s *EventService) ListEvents(filters map[string]interface{}, page, limit in
 		return nil, 0, err
 	}
 
-	// Add registered counts
+	// Add registered counts and bill names
 	for i := range events {
 		events[i].RegisteredCount = int(s.eventRepo.GetRegisteredCount(events[i].ID))
+		// Populate bill name if bill_id exists
+		if events[i].BillId != nil && *events[i].BillId > 0 {
+			events[i].BillName = s.eventRepo.GetBillName(*events[i].BillId)
+		}
 	}
 
 	return events, total, nil
@@ -98,7 +115,73 @@ func (s *EventService) DeleteEvent(id uint) error {
 	return s.eventRepo.Delete(id)
 }
 
+// ============================================
+// Owner-based methods for data filtering
+// ============================================
+
+// CreateEventWithOwner creates a new event with owner context
+func (s *EventService) CreateEventWithOwner(event *models.Event, userId uint, ownerCtx *utils.OwnerContext) error {
+	event.CreatedBy = int64(userId)
+
+	isDeleted := false
+	event.IsDeleted = &isDeleted
+
+	if event.Status == nil {
+		status := "draft"
+		event.Status = &status
+	}
+
+	code := s.generateUniqueRegistrationCode()
+	event.RegistrationCode = &code
+
+	return s.eventRepo.CreateWithOwner(event, ownerCtx)
+}
+
+// GetEventByIDWithOwner retrieves an event with owner filtering
+func (s *EventService) GetEventByIDWithOwner(id uint, ownerCtx *utils.OwnerContext) (*models.Event, error) {
+	event, err := s.eventRepo.FindByIDWithOwner(id, ownerCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	event.RegisteredCount = int(s.eventRepo.GetRegisteredCount(id))
+
+	if event.BillId != nil && *event.BillId > 0 {
+		event.BillName = s.eventRepo.GetBillName(*event.BillId)
+	}
+
+	return event, nil
+}
+
+// ListEventsWithOwner retrieves paginated events with owner filtering
+func (s *EventService) ListEventsWithOwner(filters map[string]interface{}, page, limit int, ownerCtx *utils.OwnerContext) ([]models.Event, int64, error) {
+	events, total, err := s.eventRepo.ListWithOwner(filters, page, limit, ownerCtx)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	for i := range events {
+		events[i].RegisteredCount = int(s.eventRepo.GetRegisteredCount(events[i].ID))
+		if events[i].BillId != nil && *events[i].BillId > 0 {
+			events[i].BillName = s.eventRepo.GetBillName(*events[i].BillId)
+		}
+	}
+
+	return events, total, nil
+}
+
+// UpdateEventWithOwner updates an event with owner verification
+func (s *EventService) UpdateEventWithOwner(id uint, updates map[string]interface{}, ownerCtx *utils.OwnerContext) error {
+	return s.eventRepo.UpdateWithOwner(id, updates, ownerCtx)
+}
+
+// DeleteEventWithOwner soft deletes an event with owner verification
+func (s *EventService) DeleteEventWithOwner(id uint, ownerCtx *utils.OwnerContext) error {
+	return s.eventRepo.DeleteWithOwner(id, ownerCtx)
+}
+
 // RegisterForEvent handles event registration with validation
+// If a school is already registered, it updates the existing registration
 func (s *EventService) RegisterForEvent(eventCode string, registration *models.EventRegistration, userId *uint) error {
 	// Get event
 	event, err := s.eventRepo.FindByCode(eventCode)
@@ -106,8 +189,24 @@ func (s *EventService) RegisterForEvent(eventCode string, registration *models.E
 		return errors.New("event not found")
 	}
 
-	// Validate registration
-	if err := s.validateRegistration(event, registration); err != nil {
+	// Debug logging
+	println("DEBUG: RegisterForEvent - eventCode:", eventCode, "event.ID:", event.ID, "registration.SchoolId:", registration.SchoolId)
+
+	// Check if school already registered
+	if registration.SchoolId != 0 {
+		println("DEBUG: Checking for existing registration - event.ID:", event.ID, "schoolId:", registration.SchoolId)
+		existingReg, err := s.regRepo.FindByEventAndSchool(event.ID, registration.SchoolId)
+		println("DEBUG: FindByEventAndSchool result - err:", err, "existingReg != nil:", existingReg != nil)
+		if err == nil && existingReg != nil {
+			// School already registered - update the existing registration
+			println("DEBUG: Found existing registration, updating...")
+			return s.updateExistingRegistration(existingReg, registration, userId)
+		}
+		println("DEBUG: No existing registration found, creating new...")
+	}
+
+	// Validate new registration (check max attendees)
+	if err := s.validateNewRegistration(event); err != nil {
 		return err
 	}
 
@@ -138,16 +237,41 @@ func (s *EventService) RegisterForEvent(eventCode string, registration *models.E
 	return s.regRepo.Create(registration)
 }
 
-// validateRegistration validates event registration
-func (s *EventService) validateRegistration(event *models.Event, registration *models.EventRegistration) error {
-	// Check if school already registered
-	if registration.SchoolId != 0 {
-		exists, _ := s.regRepo.SchoolAlreadyRegistered(event.ID, registration.SchoolId)
-		if exists {
-			return errors.New("school already registered for this event")
-		}
+// updateExistingRegistration updates an existing school registration with new data
+// This also reactivates previously cancelled registrations
+func (s *EventService) updateExistingRegistration(existing *models.EventRegistration, newData *models.EventRegistration, userId *uint) error {
+	updates := make(map[string]interface{})
+
+	// Reset soft delete flags to reactivate cancelled registrations
+	updates["is_deleted"] = false
+	updates["deleted_at"] = nil
+
+	// Update number of attendees if provided
+	if newData.NumberOfAttendees != nil {
+		updates["number_of_attendees"] = *newData.NumberOfAttendees
 	}
 
+	// Update payment details if provided
+	if newData.PaymentMethod != nil {
+		updates["payment_method"] = *newData.PaymentMethod
+	}
+	if newData.PaymentPhone != nil {
+		updates["payment_phone"] = *newData.PaymentPhone
+	}
+
+	// Update registered_by if provided
+	if userId != nil {
+		updates["registered_by"] = int64(*userId)
+	}
+
+	// Update registration date to now
+	updates["registration_date"] = time.Now()
+
+	return s.regRepo.Update(existing.ID, updates)
+}
+
+// validateNewRegistration validates a new event registration (checks max attendees only)
+func (s *EventService) validateNewRegistration(event *models.Event) error {
 	// Check max attendees
 	if event.MaxAttendees != nil && *event.MaxAttendees > 0 {
 		count, _ := s.regRepo.CountByEvent(event.ID)

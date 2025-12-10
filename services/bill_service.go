@@ -4,23 +4,21 @@ import (
 	"errors"
 	"gnaps-api/models"
 	"gnaps-api/repositories"
+	"gnaps-api/utils"
 )
 
 type BillService struct {
-	billRepo           *repositories.BillRepository
-	billItemRepo       *repositories.BillItemRepository
-	billAssignmentRepo *repositories.BillAssignmentRepository
+	billRepo     *repositories.BillRepository
+	billItemRepo *repositories.BillItemRepository
 }
 
 func NewBillService(
 	billRepo *repositories.BillRepository,
 	billItemRepo *repositories.BillItemRepository,
-	billAssignmentRepo *repositories.BillAssignmentRepository,
 ) *BillService {
 	return &BillService{
-		billRepo:           billRepo,
-		billItemRepo:       billItemRepo,
-		billAssignmentRepo: billAssignmentRepo,
+		billRepo:     billRepo,
+		billItemRepo: billItemRepo,
 	}
 }
 
@@ -120,43 +118,40 @@ func (s *BillService) DeleteBillItem(id uint) error {
 		return errors.New("bill item not found")
 	}
 
-	// Also delete all assignments for this bill item
-	_ = s.billAssignmentRepo.DeleteByBillItemID(id)
-
 	return s.billItemRepo.Delete(id)
 }
 
-// Bill Assignment operations
-func (s *BillService) GetAssignmentsByBillItemID(billItemId uint) ([]models.BillAssignment, error) {
-	return s.billAssignmentRepo.FindByBillItemID(billItemId)
+// ============================================
+// Owner-based methods for data filtering
+// ============================================
+
+// GetBillByIDWithOwner retrieves a bill with owner filtering
+func (s *BillService) GetBillByIDWithOwner(id uint, ownerCtx *utils.OwnerContext) (*models.Bill, error) {
+	return s.billRepo.FindByIDWithOwner(id, ownerCtx)
 }
 
-func (s *BillService) CreateAssignments(assignments []models.BillAssignment) error {
-	if len(assignments) == 0 {
-		return errors.New("no assignments provided")
-	}
-
-	// Validate all assignments
-	for _, assignment := range assignments {
-		if assignment.BillItemId == nil {
-			return errors.New("bill_item_id is required")
-		}
-		if assignment.EntityType == nil || *assignment.EntityType == "" {
-			return errors.New("entity_type is required")
-		}
-		if assignment.EntityId == nil {
-			return errors.New("entity_id is required")
-		}
-	}
-
-	return s.billAssignmentRepo.BulkCreate(assignments)
+// ListBillsWithOwner retrieves bills with owner filtering
+func (s *BillService) ListBillsWithOwner(filters map[string]interface{}, page, limit int, ownerCtx *utils.OwnerContext) ([]models.Bill, int64, error) {
+	return s.billRepo.ListWithOwner(filters, page, limit, ownerCtx)
 }
 
-func (s *BillService) DeleteAssignment(id uint) error {
-	_, err := s.billAssignmentRepo.FindByID(id)
-	if err != nil {
-		return errors.New("assignment not found")
+// CreateBillWithOwner creates a bill with owner context
+func (s *BillService) CreateBillWithOwner(bill *models.Bill, ownerCtx *utils.OwnerContext) error {
+	if bill.Name == nil || *bill.Name == "" {
+		return errors.New("name is required")
 	}
 
-	return s.billAssignmentRepo.Delete(id)
+	bill.IsDeleted = false
+
+	return s.billRepo.CreateWithOwner(bill, ownerCtx)
+}
+
+// UpdateBillWithOwner updates a bill with owner verification
+func (s *BillService) UpdateBillWithOwner(id uint, updates map[string]interface{}, ownerCtx *utils.OwnerContext) error {
+	return s.billRepo.UpdateWithOwner(id, updates, ownerCtx)
+}
+
+// DeleteBillWithOwner soft deletes a bill with owner verification
+func (s *BillService) DeleteBillWithOwner(id uint, ownerCtx *utils.OwnerContext) error {
+	return s.billRepo.DeleteWithOwner(id, ownerCtx)
 }

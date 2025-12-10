@@ -33,6 +33,17 @@ func (n *NewsController) Handle(action string, c *fiber.Ctx) error {
 		return n.update(c)
 	case "delete":
 		return n.delete(c)
+	// Owner-based news actions (uses executive owner context)
+	case "owner_list":
+		return n.ownerList(c)
+	case "owner_show":
+		return n.ownerShow(c)
+	case "owner_create":
+		return n.ownerCreate(c)
+	case "owner_update":
+		return n.ownerUpdate(c)
+	case "owner_delete":
+		return n.ownerDelete(c)
 	// News Comments actions
 	case "list_comments":
 		return n.listComments(c)
@@ -250,6 +261,181 @@ func (n *NewsController) delete(c *fiber.Ctx) error {
 			return utils.ForbiddenResponse(c, err.Error())
 		}
 		return utils.ServerErrorResponse(c, err.Error())
+	}
+
+	return utils.SuccessResponse(c, nil, "News deleted successfully")
+}
+
+// ==================== OWNER-BASED NEWS ENDPOINTS ====================
+// These endpoints use executive owner context for data filtering
+// Zone admins see zone data, Region admins see region data, National admins see all
+
+func (n *NewsController) ownerList(c *fiber.Ctx) error {
+	// Get owner context from middleware
+	ownerCtx := utils.GetOwnerContext(c)
+
+	// Parse filters from query params
+	filters := make(map[string]interface{})
+	if status := c.Query("status"); status != "" {
+		filters["status"] = status
+	}
+	if category := c.Query("category"); category != "" {
+		filters["category"] = category
+	}
+	if featured := c.Query("featured"); featured != "" {
+		filters["featured"] = featured == "true" || featured == "1"
+	}
+	if title := c.Query("title"); title != "" {
+		filters["title"] = title
+	}
+
+	// Pagination
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "10"))
+
+	news, total, err := n.newsService.ListNewsWithOwner(filters, page, limit, ownerCtx)
+	if err != nil {
+		return utils.ServerErrorResponse(c, "Failed to retrieve news")
+	}
+
+	if news == nil {
+		news = []models.New{}
+	}
+
+	return c.JSON(fiber.Map{
+		"data": news,
+		"pagination": fiber.Map{
+			"page":  page,
+			"limit": limit,
+			"total": total,
+		},
+	})
+}
+
+func (n *NewsController) ownerShow(c *fiber.Ctx) error {
+	ownerCtx := utils.GetOwnerContext(c)
+
+	id := c.Params("id")
+	if id == "" {
+		id = c.Query("id")
+	}
+
+	if id == "" {
+		return utils.ValidationErrorResponse(c, "ID is required")
+	}
+
+	newsId, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return utils.ValidationErrorResponse(c, "Invalid ID")
+	}
+
+	newsItem, err := n.newsService.GetNewsByIDWithOwner(uint(newsId), ownerCtx)
+	if err != nil {
+		return utils.NotFoundResponse(c, err.Error())
+	}
+
+	return c.JSON(fiber.Map{"data": newsItem})
+}
+
+func (n *NewsController) ownerCreate(c *fiber.Ctx) error {
+	ownerCtx := utils.GetOwnerContext(c)
+
+	var newsItem models.New
+	if err := c.BodyParser(&newsItem); err != nil {
+		return utils.ValidationErrorResponse(c, "Invalid request body")
+	}
+
+	if err := n.newsService.CreateNewsWithOwner(&newsItem, ownerCtx); err != nil {
+		if err.Error() == "system admin cannot modify data in owner-based tables (view only)" {
+			return utils.ForbiddenResponse(c, err.Error())
+		}
+		return utils.ValidationErrorResponse(c, err.Error())
+	}
+
+	return utils.SuccessResponseWithStatus(c, 201, newsItem, "News created successfully")
+}
+
+func (n *NewsController) ownerUpdate(c *fiber.Ctx) error {
+	ownerCtx := utils.GetOwnerContext(c)
+
+	id := c.Params("id")
+	if id == "" {
+		id = c.Query("id")
+	}
+
+	if id == "" {
+		return utils.ValidationErrorResponse(c, "ID is required")
+	}
+
+	newsId, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return utils.ValidationErrorResponse(c, "Invalid ID")
+	}
+
+	var updateData models.New
+	if err := c.BodyParser(&updateData); err != nil {
+		return utils.ValidationErrorResponse(c, "Invalid request body")
+	}
+
+	// Build updates map
+	updates := make(map[string]interface{})
+	if updateData.Title != nil {
+		updates["title"] = updateData.Title
+	}
+	if updateData.Content != nil {
+		updates["content"] = updateData.Content
+	}
+	if updateData.Excerpt != nil {
+		updates["excerpt"] = updateData.Excerpt
+	}
+	if updateData.ImageUrl != nil {
+		updates["image_url"] = updateData.ImageUrl
+	}
+	if updateData.Category != nil {
+		updates["category"] = updateData.Category
+	}
+	if updateData.Status != nil {
+		updates["status"] = updateData.Status
+	}
+	if updateData.Featured != nil {
+		updates["featured"] = updateData.Featured
+	}
+
+	if err := n.newsService.UpdateNewsWithOwner(uint(newsId), updates, ownerCtx); err != nil {
+		if err.Error() == "system admin cannot modify data in owner-based tables (view only)" {
+			return utils.ForbiddenResponse(c, err.Error())
+		}
+		return utils.NotFoundResponse(c, err.Error())
+	}
+
+	// Get updated news item
+	newsItem, _ := n.newsService.GetNewsByIDWithOwner(uint(newsId), ownerCtx)
+
+	return utils.SuccessResponse(c, newsItem, "News updated successfully")
+}
+
+func (n *NewsController) ownerDelete(c *fiber.Ctx) error {
+	ownerCtx := utils.GetOwnerContext(c)
+
+	id := c.Params("id")
+	if id == "" {
+		id = c.Query("id")
+	}
+
+	if id == "" {
+		return utils.ValidationErrorResponse(c, "ID is required")
+	}
+
+	newsId, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return utils.ValidationErrorResponse(c, "Invalid ID")
+	}
+
+	if err := n.newsService.DeleteNewsWithOwner(uint(newsId), ownerCtx); err != nil {
+		if err.Error() == "system admin cannot modify data in owner-based tables (view only)" {
+			return utils.ForbiddenResponse(c, err.Error())
+		}
+		return utils.NotFoundResponse(c, err.Error())
 	}
 
 	return utils.SuccessResponse(c, nil, "News deleted successfully")

@@ -3,7 +3,9 @@ package main
 import (
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"gnaps-api/config"
 	"gnaps-api/controllers"
@@ -29,6 +31,13 @@ func main() {
 
 	// Initialize dependency injection for refactored controllers
 	config.InitializeControllers(config.DBConn)
+
+	// Start the payment worker in a goroutine
+	go func() {
+		if err := config.PaymentWorker.StartWorker(config.MomoPaymentService.ProcessPaymentWithHubtel); err != nil {
+			log.Printf("Payment worker error: %v", err)
+		}
+	}()
 
 	// Generate models from database tables (only if GENERATE_MODELS=true)
 	if os.Getenv("GENERATE_MODELS") == "true" {
@@ -57,10 +66,12 @@ func main() {
 	public.All("/auth/:action", config.DynamicControllerDispatcher)
 	public.All("/public-events/:action/:id", config.DynamicControllerDispatcher)
 	public.All("/public-events/:action", config.DynamicControllerDispatcher)
+	public.All("/public/:action", config.DynamicControllerDispatcher) // Public school registration
 
 	// Protected routes (authentication required)
 	protected := api.Group("")
-	protected.Use(middleware.JWTAuth) // Apply JWT middleware
+	protected.Use(middleware.JWTAuth)                           // Apply JWT middleware
+	protected.Use(middleware.AttachOwnerContext(config.DBConn)) // Attach owner context for executive users
 	protected.All("/:controller/:action/:id", config.DynamicControllerDispatcher)
 	protected.All("/:controller/:action", config.DynamicControllerDispatcher)
 
@@ -75,6 +86,41 @@ func main() {
 	// Serve static files (uploaded images)
 	app.Static("/uploads", "./uploads")
 
-	// Start the server on port 3010
-	log.Fatal(app.Listen(":3010"))
+	// Start the server on configured port
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "3020"
+	}
+
+	// Setup graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+
+	// Start server in goroutine
+	go func() {
+		if err := app.Listen(":" + port); err != nil {
+			log.Printf("Server error: %v", err)
+		}
+	}()
+
+	log.Printf("Server started on port %s. Press Ctrl+C to stop.", port)
+
+	// Wait for interrupt signal
+	<-quit
+	log.Println("\nShutting down server...")
+
+	// Shutdown Fiber server
+	if err := app.Shutdown(); err != nil {
+		log.Printf("Error shutting down server: %v", err)
+	}
+
+	// Close payment worker
+	if config.PaymentWorker != nil {
+		log.Println("Closing payment worker...")
+		if err := config.PaymentWorker.Close(); err != nil {
+			log.Printf("Error closing payment worker: %v", err)
+		}
+	}
+
+	log.Println("Server stopped gracefully")
 }

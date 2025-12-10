@@ -36,12 +36,12 @@ func ConnectDb() {
 
 	log.Println("Database connected")
 
-	// Auto-migrate the User model
-	// if err := db.AutoMigrate(&models.User{}); err != nil {
-	// 	log.Fatal("Failed to migrate database: ", err)
-	// 	os.Exit(2)
+	// Auto-migrate the ActivityLog model
+	// if err := db.AutoMigrate(&models.ActivityLog{}); err != nil {
+	// 	log.Printf("Warning: Failed to migrate ActivityLog table: %v", err)
+	// } else {
+	// 	log.Println("ActivityLog table migration completed")
 	// }
-	// log.Println("Database migration completed successfully")
 
 	DBConn = db
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gnaps-api/models"
 	"gnaps-api/services"
+	"gnaps-api/utils"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -37,6 +38,12 @@ func (z *ZonesController) Handle(action string, c *fiber.Ctx) error {
 }
 
 func (z *ZonesController) list(c *fiber.Ctx) error {
+	// Get owner context for role-based filtering
+	ownerCtx := utils.GetOwnerContext(c)
+	if ownerCtx == nil {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized - owner context not found"})
+	}
+
 	// Parse filters from query params
 	filters := make(map[string]interface{})
 	if regionID := c.Query("region_id"); regionID != "" {
@@ -56,7 +63,7 @@ func (z *ZonesController) list(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "10"))
 
-	zones, total, err := z.zoneService.ListZones(filters, page, limit)
+	zones, total, err := z.zoneService.ListZonesWithRole(filters, page, limit, ownerCtx)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error":   "Failed to retrieve zones",
@@ -79,6 +86,12 @@ func (z *ZonesController) list(c *fiber.Ctx) error {
 }
 
 func (z *ZonesController) show(c *fiber.Ctx) error {
+	// Get owner context for role-based filtering
+	ownerCtx := utils.GetOwnerContext(c)
+	if ownerCtx == nil {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized - owner context not found"})
+	}
+
 	id := c.Params("id")
 	if id == "" {
 		id = c.Query("id")
@@ -93,7 +106,7 @@ func (z *ZonesController) show(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
-	zone, err := z.zoneService.GetZoneByID(uint(zoneId))
+	zone, err := z.zoneService.GetZoneByIDWithRole(uint(zoneId), ownerCtx)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
 	}

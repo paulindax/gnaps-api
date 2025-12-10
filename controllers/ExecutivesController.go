@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gnaps-api/models"
 	"gnaps-api/services"
+	"gnaps-api/utils"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -37,6 +38,12 @@ func (e *ExecutivesController) Handle(action string, c *fiber.Ctx) error {
 }
 
 func (e *ExecutivesController) list(c *fiber.Ctx) error {
+	// Get owner context for role-based filtering
+	ownerCtx := utils.GetOwnerContext(c)
+	if ownerCtx == nil {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized - owner context not found"})
+	}
+
 	// Parse filters from query params
 	filters := make(map[string]interface{})
 
@@ -86,7 +93,7 @@ func (e *ExecutivesController) list(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "10"))
 
-	executives, total, err := e.executiveService.ListExecutives(filters, page, limit)
+	executives, total, err := e.executiveService.ListExecutivesWithRole(filters, page, limit, ownerCtx)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error":   "Failed to retrieve executives",
@@ -109,6 +116,12 @@ func (e *ExecutivesController) list(c *fiber.Ctx) error {
 }
 
 func (e *ExecutivesController) show(c *fiber.Ctx) error {
+	// Get owner context for role-based filtering
+	ownerCtx := utils.GetOwnerContext(c)
+	if ownerCtx == nil {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized - owner context not found"})
+	}
+
 	id := c.Params("id")
 	if id == "" {
 		id = c.Query("id")
@@ -123,7 +136,7 @@ func (e *ExecutivesController) show(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
-	executive, err := e.executiveService.GetExecutiveByID(uint(executiveId))
+	executive, err := e.executiveService.GetExecutiveByIDWithRole(uint(executiveId), ownerCtx)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
 	}

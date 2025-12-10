@@ -138,12 +138,77 @@ func extractTransientFields(filePath string) ([]string, error) {
 	return transientFields, nil
 }
 
+// extractCustomMethods reads an existing model file and extracts custom methods
+// (everything after the TableName() function)
+func extractCustomMethods(filePath string) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		// File doesn't exist, no custom methods to preserve
+		return nil, nil
+	}
+	defer file.Close()
+
+	var customMethods []string
+	var foundTableName bool
+	var tableNameBraceCount int
+	var afterTableName bool
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+
+		// Look for the TableName function
+		if strings.Contains(trimmed, "func") && strings.Contains(trimmed, "TableName()") {
+			foundTableName = true
+			tableNameBraceCount = strings.Count(line, "{") - strings.Count(line, "}")
+			continue
+		}
+
+		// Track braces to find the end of TableName function
+		if foundTableName && !afterTableName {
+			tableNameBraceCount += strings.Count(line, "{") - strings.Count(line, "}")
+			if tableNameBraceCount <= 0 {
+				afterTableName = true
+			}
+			continue
+		}
+
+		// Capture everything after TableName function
+		if afterTableName {
+			customMethods = append(customMethods, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	// Trim leading empty lines
+	for len(customMethods) > 0 && strings.TrimSpace(customMethods[0]) == "" {
+		customMethods = customMethods[1:]
+	}
+
+	// Trim trailing empty lines
+	for len(customMethods) > 0 && strings.TrimSpace(customMethods[len(customMethods)-1]) == "" {
+		customMethods = customMethods[:len(customMethods)-1]
+	}
+
+	return customMethods, nil
+}
+
 // GenerateModelFromTable generates a Go struct definition from a database table
 func GenerateModelFromTable(db *gorm.DB, tableName string, existingFilePath string) (string, error) {
 	// Extract transient fields from existing file if it exists
 	transientFields, err := extractTransientFields(existingFilePath)
 	if err != nil {
 		log.Printf("Warning: Could not extract transient fields from %s: %v", existingFilePath, err)
+	}
+
+	// Extract custom methods from existing file if it exists
+	customMethods, err := extractCustomMethods(existingFilePath)
+	if err != nil {
+		log.Printf("Warning: Could not extract custom methods from %s: %v", existingFilePath, err)
 	}
 	// Get column types using raw SQL to describe the table
 	rows, err := db.Raw(fmt.Sprintf("DESCRIBE %s", tableName)).Rows()
@@ -272,6 +337,14 @@ func GenerateModelFromTable(db *gorm.DB, tableName string, existingFilePath stri
 	structBuilder.WriteString(fmt.Sprintf("func (%s) TableName() string {\n", structName))
 	structBuilder.WriteString(fmt.Sprintf("\treturn \"%s\"\n", tableName))
 	structBuilder.WriteString("}\n")
+
+	// Add preserved custom methods (like SetOwner) if any exist
+	if len(customMethods) > 0 {
+		structBuilder.WriteString("\n")
+		for _, method := range customMethods {
+			structBuilder.WriteString(method + "\n")
+		}
+	}
 
 	return structBuilder.String(), nil
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gnaps-api/models"
 	"gnaps-api/services"
+	"gnaps-api/utils"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -39,12 +40,6 @@ func (b *BillsController) Handle(action string, c *fiber.Ctx) error {
 		return b.updateItem(c)
 	case "delete-item":
 		return b.deleteItem(c)
-	case "item-assignments":
-		return b.getItemAssignments(c)
-	case "create-assignments":
-		return b.createAssignments(c)
-	case "delete-assignment":
-		return b.deleteAssignment(c)
 	default:
 		return c.Status(404).JSON(fiber.Map{"error": fmt.Sprintf("unknown action %s", action)})
 	}
@@ -71,7 +66,10 @@ func (b *BillsController) list(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "10"))
 
-	bills, total, err := b.billService.ListBills(filters, page, limit)
+	// Get owner context for filtering
+	ownerCtx := utils.GetOwnerContext(c)
+
+	bills, total, err := b.billService.ListBillsWithOwner(filters, page, limit, ownerCtx)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error":   "Failed to retrieve bills",
@@ -108,9 +106,12 @@ func (b *BillsController) show(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
-	bill, err := b.billService.GetBillByID(uint(billId))
+	// Get owner context for filtering
+	ownerCtx := utils.GetOwnerContext(c)
+
+	bill, err := b.billService.GetBillByIDWithOwner(uint(billId), ownerCtx)
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(404).JSON(fiber.Map{"error": "bill not found"})
 	}
 
 	return c.JSON(fiber.Map{"data": bill})
@@ -125,7 +126,13 @@ func (b *BillsController) create(c *fiber.Ctx) error {
 		})
 	}
 
-	if err := b.billService.CreateBill(&bill); err != nil {
+	// Get owner context for write permission check
+	ownerCtx := utils.GetOwnerContext(c)
+
+	if err := b.billService.CreateBillWithOwner(&bill, ownerCtx); err != nil {
+		if err.Error() == "system admin cannot modify data in owner-based tables (view only)" {
+			return c.Status(403).JSON(fiber.Map{"error": err.Error()})
+		}
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -171,15 +178,21 @@ func (b *BillsController) update(c *fiber.Ctx) error {
 		updates["description"] = *updateData.Description
 	}
 
-	if err := b.billService.UpdateBill(uint(billId), updates); err != nil {
-		if err.Error() == "bill not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+	// Get owner context for write permission check
+	ownerCtx := utils.GetOwnerContext(c)
+
+	if err := b.billService.UpdateBillWithOwner(uint(billId), updates, ownerCtx); err != nil {
+		if err.Error() == "system admin cannot modify data in owner-based tables (view only)" {
+			return c.Status(403).JSON(fiber.Map{"error": err.Error()})
+		}
+		if err.Error() == "record not found" {
+			return c.Status(404).JSON(fiber.Map{"error": "bill not found"})
 		}
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	// Get updated bill
-	bill, _ := b.billService.GetBillByID(uint(billId))
+	bill, _ := b.billService.GetBillByIDWithOwner(uint(billId), ownerCtx)
 
 	return c.JSON(fiber.Map{
 		"message": "Bill updated successfully",
@@ -206,9 +219,15 @@ func (b *BillsController) delete(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
 	}
 
-	if err := b.billService.DeleteBill(uint(billId)); err != nil {
-		if err.Error() == "bill not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+	// Get owner context for write permission check
+	ownerCtx := utils.GetOwnerContext(c)
+
+	if err := b.billService.DeleteBillWithOwner(uint(billId), ownerCtx); err != nil {
+		if err.Error() == "system admin cannot modify data in owner-based tables (view only)" {
+			return c.Status(403).JSON(fiber.Map{"error": err.Error()})
+		}
+		if err.Error() == "record not found" {
+			return c.Status(404).JSON(fiber.Map{"error": "bill not found"})
 		}
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -386,96 +405,6 @@ func (b *BillsController) deleteItem(c *fiber.Ctx) error {
 		"message": "Bill item deleted successfully",
 		"flash_message": fiber.Map{
 			"msg":  "Bill item deleted successfully",
-			"type": "success",
-		},
-	})
-}
-
-// Assignment operations
-func (b *BillsController) getItemAssignments(c *fiber.Ctx) error {
-	id := c.Params("id")
-	if id == "" {
-		id = c.Query("bill_item_id")
-	}
-
-	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "Bill Item ID is required"})
-	}
-
-	itemId, err := strconv.ParseUint(id, 10, 64)
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid Bill Item ID"})
-	}
-
-	assignments, err := b.billService.GetAssignmentsByBillItemID(uint(itemId))
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "Failed to retrieve assignments",
-			"details": err.Error(),
-		})
-	}
-
-	return c.JSON(fiber.Map{"data": assignments})
-}
-
-func (b *BillsController) createAssignments(c *fiber.Ctx) error {
-	var request struct {
-		BillItemId uint                      `json:"bill_item_id"`
-		Assignments []models.BillAssignment  `json:"assignments"`
-	}
-
-	if err := c.BodyParser(&request); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error":   "Invalid request body",
-			"details": err.Error(),
-		})
-	}
-
-	// Set the bill item ID for all assignments
-	for i := range request.Assignments {
-		request.Assignments[i].BillItemId = &request.BillItemId
-	}
-
-	if err := b.billService.CreateAssignments(request.Assignments); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	return c.Status(201).JSON(fiber.Map{
-		"message": "Assignments created successfully",
-		"flash_message": fiber.Map{
-			"msg":  "Assignments created successfully",
-			"type": "success",
-		},
-		"data": request.Assignments,
-	})
-}
-
-func (b *BillsController) deleteAssignment(c *fiber.Ctx) error {
-	id := c.Params("id")
-	if id == "" {
-		id = c.Query("id")
-	}
-
-	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
-	}
-
-	assignmentId, err := strconv.ParseUint(id, 10, 64)
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid ID"})
-	}
-
-	if err := b.billService.DeleteAssignment(uint(assignmentId)); err != nil {
-		if err.Error() == "assignment not found" {
-			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
-		}
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	return c.JSON(fiber.Map{
-		"message": "Assignment deleted successfully",
-		"flash_message": fiber.Map{
-			"msg":  "Assignment deleted successfully",
 			"type": "success",
 		},
 	})

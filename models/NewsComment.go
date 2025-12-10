@@ -12,11 +12,13 @@ type NewsComment struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`
 
-	Content *string `json:"content" gorm:"column:content"`
-	NewsId *int64 `json:"news_id" gorm:"column:news_id"`
-	UserId *int64 `json:"user_id" gorm:"column:user_id"`
-	IsDeleted *bool `json:"is_deleted" gorm:"column:is_deleted"`
-	IsApproved *bool `json:"is_approved" gorm:"column:is_approved"`
+	Content    *string `json:"content" gorm:"column:content"`
+	NewsId     *int64  `json:"news_id" gorm:"column:news_id"`
+	UserId     *int64  `json:"user_id" gorm:"column:user_id"`
+	IsDeleted  *bool   `json:"is_deleted" gorm:"column:is_deleted"`
+	IsApproved *bool   `json:"is_approved" gorm:"column:is_approved"`
+	OwnerType  *string `json:"owner_type" gorm:"column:owner_type"`
+	OwnerId    *int64  `json:"owner_id" gorm:"column:owner_id"`
 }
 
 func (NewsComment) TableName() string {

@@ -2,16 +2,22 @@ package services
 
 import (
 	"errors"
+	"fmt"
 	"gnaps-api/models"
 	"gnaps-api/repositories"
+	"gnaps-api/utils"
 )
 
 type SchoolService struct {
 	schoolRepo *repositories.SchoolRepository
+	userRepo   *repositories.UserRepository
 }
 
-func NewSchoolService(schoolRepo *repositories.SchoolRepository) *SchoolService {
-	return &SchoolService{schoolRepo: schoolRepo}
+func NewSchoolService(schoolRepo *repositories.SchoolRepository, userRepo *repositories.UserRepository) *SchoolService {
+	return &SchoolService{
+		schoolRepo: schoolRepo,
+		userRepo:   userRepo,
+	}
 }
 
 // Search searches for schools by keyword
@@ -75,6 +81,28 @@ func (s *SchoolService) CreateSchool(school *models.School) error {
 	isDeleted := false
 	school.IsDeleted = &isDeleted
 
+	// Create user account for the school if email is provided
+	if school.Email != nil && *school.Email != "" {
+		mobileNo := ""
+		if school.MobileNo != nil {
+			mobileNo = *school.MobileNo
+		}
+
+		user, err := s.userRepo.CreateUserForSchool(
+			school.Name,
+			*school.Email,
+			mobileNo,
+			school.MemberNo, // Password will be member_no + "123"
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create user account: %v", err)
+		}
+
+		// Set the user_id on the school
+		userID := int64(user.ID)
+		school.UserId = &userID
+	}
+
 	return s.schoolRepo.Create(school)
 }
 
@@ -127,16 +155,76 @@ func (s *SchoolService) UpdateSchool(id uint, updates map[string]interface{}) er
 		}
 	}
 
+	// Update the associated user if school has a user_id
+	if school.UserId != nil && *school.UserId > 0 {
+		userUpdates := make(map[string]interface{})
+
+		// Sync relevant fields to user
+		if name, ok := updates["name"]; ok {
+			userUpdates["first_name"] = name // School name maps to user first_name
+		}
+		if email, ok := updates["email"]; ok {
+			userUpdates["email"] = email
+		}
+		if mobileNo, ok := updates["mobile_no"]; ok {
+			userUpdates["mobile_no"] = mobileNo
+		}
+		if memberNo, ok := updates["member_no"]; ok {
+			userUpdates["username"] = memberNo // Member number maps to username
+		}
+
+		// Only update user if there are changes to sync
+		if len(userUpdates) > 0 {
+			if err := s.userRepo.Update(uint(*school.UserId), userUpdates); err != nil {
+				return fmt.Errorf("failed to update user account: %v", err)
+			}
+		}
+	}
+
 	return s.schoolRepo.Update(id, updates)
 }
 
 // DeleteSchool soft deletes a school
 func (s *SchoolService) DeleteSchool(id uint) error {
 	// Verify school exists
-	_, err := s.schoolRepo.FindByID(id)
+	school, err := s.schoolRepo.FindByID(id)
 	if err != nil {
 		return errors.New("school not found")
 	}
 
+	// Also soft delete the associated user
+	if school.UserId != nil && *school.UserId > 0 {
+		if err := s.userRepo.Delete(uint(*school.UserId)); err != nil {
+			return fmt.Errorf("failed to delete user account: %v", err)
+		}
+	}
+
 	return s.schoolRepo.Delete(id)
+}
+
+// GetNextMemberNoForZone returns the next member number for a zone
+func (s *SchoolService) GetNextMemberNoForZone(zoneID int64) (string, error) {
+	return s.schoolRepo.GetNextMemberNoForZone(zoneID)
+}
+
+// ============================================
+// Role-Based Filtering Methods
+// ============================================
+
+// ListSchoolsWithRole returns schools filtered by role-based access
+func (s *SchoolService) ListSchoolsWithRole(filters map[string]interface{}, page, limit int, ownerCtx *utils.OwnerContext) ([]models.School, int64, error) {
+	regionID := ownerCtx.GetRegionIDFilter()
+	zoneID := ownerCtx.GetZoneIDFilter()
+	return s.schoolRepo.ListWithRoleFilter(filters, page, limit, regionID, zoneID)
+}
+
+// GetSchoolByIDWithRole returns a school if accessible by the user's role
+func (s *SchoolService) GetSchoolByIDWithRole(id uint, ownerCtx *utils.OwnerContext) (*models.School, error) {
+	regionID := ownerCtx.GetRegionIDFilter()
+	zoneID := ownerCtx.GetZoneIDFilter()
+	school, err := s.schoolRepo.FindByIDWithRoleFilter(id, regionID, zoneID)
+	if err != nil {
+		return nil, errors.New("school not found or access denied")
+	}
+	return school, nil
 }

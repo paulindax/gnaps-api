@@ -1,9 +1,9 @@
 package models
 
 import (
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"time"
-	"gorm.io/datatypes"
 )
 
 // Bill model generated from database table 'bills'
@@ -13,16 +13,24 @@ type Bill struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`
 
-	Name *string `json:"name" gorm:"column:name"`
-	Description *string `json:"description" gorm:"column:description"`
-	IsDeleted bool `json:"is_deleted" gorm:"column:is_deleted"`
-	IsApproved *bool `json:"is_approved" gorm:"column:is_approved"`
-	ZonesIds *datatypes.JSON `json:"zones_ids" gorm:"column:zones_ids"`
-	ForwardArrears *bool `json:"forward_arrears" gorm:"column:forward_arrears"`
-	IsGenerating *bool `json:"is_generating" gorm:"column:is_generating"`
-	Settings *datatypes.JSON `json:"settings" gorm:"column:settings"`
+	Name           *string         `json:"name" gorm:"column:name"`
+	Description    *string         `json:"description" gorm:"column:description"`
+	IsDeleted      bool            `json:"is_deleted" gorm:"column:is_deleted"`
+	IsApproved     *bool           `json:"is_approved" gorm:"column:is_approved"`
+	ZonesIds       *datatypes.JSON `json:"zones_ids" gorm:"column:zones_ids"`
+	ForwardArrears *bool           `json:"forward_arrears" gorm:"column:forward_arrears"`
+	IsGenerating   *bool           `json:"is_generating" gorm:"column:is_generating"`
+	Settings       *datatypes.JSON `json:"settings" gorm:"column:settings"`
+	OwnerType      *string         `json:"owner_type" gorm:"column:owner_type"`
+	OwnerId        *int64          `json:"owner_id" gorm:"column:owner_id"`
 }
 
 func (Bill) TableName() string {
 	return "bills"
+}
+
+// SetOwner implements the OwnerFieldSetter interface
+func (b *Bill) SetOwner(ownerType string, ownerID int64) {
+	b.OwnerType = &ownerType
+	b.OwnerId = &ownerID
 }

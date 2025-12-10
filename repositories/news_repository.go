@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"gnaps-api/models"
+	"gnaps-api/utils"
 
 	"gorm.io/gorm"
 )
@@ -146,4 +147,122 @@ func (r *NewsRepository) GetSchoolByID(id int64) (*models.School, error) {
 		return nil, err
 	}
 	return &school, nil
+}
+
+// ============================================
+// Owner-based methods for data filtering
+// ============================================
+
+// CreateWithOwner creates a new news item with owner fields automatically set
+// Returns ErrSystemAdminCannotWrite if system_admin tries to create owner-based data
+func (r *NewsRepository) CreateWithOwner(news *models.New, ownerCtx *utils.OwnerContext) error {
+	// Check if user can write owner-based data
+	if err := CanWrite(ownerCtx); err != nil {
+		return err
+	}
+
+	if ownerCtx != nil && ownerCtx.IsValid() {
+		ownerType, ownerID := ownerCtx.GetOwnerValues()
+		news.SetOwner(ownerType, ownerID)
+	}
+	return r.db.Create(news).Error
+}
+
+// FindByIDWithOwner retrieves a news item by ID with owner filtering
+func (r *NewsRepository) FindByIDWithOwner(id uint, ownerCtx *utils.OwnerContext) (*models.New, error) {
+	var news models.New
+	query := r.db.Where("id = ? AND is_deleted = ?", id, false)
+
+	// Apply owner filter
+	query = ApplyOwnerFilterToQuery(query, ownerCtx)
+
+	err := query.First(&news).Error
+	if err != nil {
+		return nil, err
+	}
+	return &news, nil
+}
+
+// ListWithOwner retrieves all news with filters, pagination, and owner filtering
+func (r *NewsRepository) ListWithOwner(filters map[string]interface{}, page, limit int, ownerCtx *utils.OwnerContext) ([]models.New, int64, error) {
+	var news []models.New
+	var total int64
+
+	query := r.db.Where("is_deleted = ?", false)
+
+	// Apply owner filter
+	query = ApplyOwnerFilterToQuery(query, ownerCtx)
+
+	// Apply other filters
+	if status, ok := filters["status"]; ok {
+		query = query.Where("status = ?", status)
+	}
+	if category, ok := filters["category"]; ok {
+		query = query.Where("category = ?", category)
+	}
+	if featured, ok := filters["featured"]; ok {
+		query = query.Where("featured = ?", featured)
+	}
+	if executiveID, ok := filters["executive_id"]; ok {
+		query = query.Where("executive_id = ?", executiveID)
+	}
+	if title, ok := filters["title"]; ok {
+		query = query.Where("title LIKE ?", "%"+title.(string)+"%")
+	}
+	if content, ok := filters["content"]; ok {
+		query = query.Where("content LIKE ?", "%"+content.(string)+"%")
+	}
+
+	// Count total before pagination
+	query.Model(&models.New{}).Count(&total)
+
+	// Apply pagination
+	offset := (page - 1) * limit
+	err := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&news).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return news, total, nil
+}
+
+// UpdateWithOwner updates a news item with owner verification
+// Returns ErrSystemAdminCannotWrite if system_admin tries to update
+func (r *NewsRepository) UpdateWithOwner(id uint, updates map[string]interface{}, ownerCtx *utils.OwnerContext) error {
+	// Check if user can write owner-based data
+	if err := CanWrite(ownerCtx); err != nil {
+		return err
+	}
+
+	query := r.db.Model(&models.New{}).Where("id = ?", id)
+
+	// Apply owner filter to ensure user can only update their own data
+	query = ApplyOwnerFilterToQuery(query, ownerCtx)
+
+	result := query.Updates(updates)
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return result.Error
+}
+
+// DeleteWithOwner soft deletes a news item with owner verification
+// Returns ErrSystemAdminCannotWrite if system_admin tries to delete
+func (r *NewsRepository) DeleteWithOwner(id uint, ownerCtx *utils.OwnerContext) error {
+	// Check if user can write owner-based data
+	if err := CanWrite(ownerCtx); err != nil {
+		return err
+	}
+
+	trueVal := true
+	query := r.db.Model(&models.New{}).Where("id = ?", id)
+
+	// Apply owner filter to ensure user can only delete their own data
+	query = ApplyOwnerFilterToQuery(query, ownerCtx)
+
+	result := query.Update("is_deleted", &trueVal)
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return result.Error
 }

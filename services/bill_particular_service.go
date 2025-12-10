@@ -4,6 +4,7 @@ import (
 	"errors"
 	"gnaps-api/models"
 	"gnaps-api/repositories"
+	"gnaps-api/utils"
 )
 
 type BillParticularService struct {
@@ -66,4 +67,47 @@ func (s *BillParticularService) DeleteParticular(id uint) error {
 	}
 
 	return s.particularRepo.Delete(id)
+}
+
+// ============================================
+// Owner-based methods for data filtering
+// ============================================
+
+func (s *BillParticularService) GetParticularByIDWithOwner(id uint, ownerCtx *utils.OwnerContext) (*models.BillParticular, error) {
+	return s.particularRepo.FindByIDWithOwner(id, ownerCtx)
+}
+
+func (s *BillParticularService) ListParticularsWithOwner(filters map[string]interface{}, page, limit int, ownerCtx *utils.OwnerContext) ([]models.BillParticular, int64, error) {
+	return s.particularRepo.ListWithOwner(filters, page, limit, ownerCtx)
+}
+
+func (s *BillParticularService) CreateParticularWithOwner(particular *models.BillParticular, ownerCtx *utils.OwnerContext) error {
+	// Validate required fields
+	if particular.Name == nil || *particular.Name == "" {
+		return errors.New("name is required")
+	}
+
+	// Set defaults
+	isDeleted := false
+	particular.IsDeleted = &isDeleted
+
+	// If priority is not set, set it to max + 1
+	if particular.Priority == nil {
+		maxPriority, err := s.particularRepo.GetMaxPriority()
+		if err != nil {
+			return err
+		}
+		newPriority := maxPriority + 1
+		particular.Priority = &newPriority
+	}
+
+	return s.particularRepo.CreateWithOwner(particular, ownerCtx)
+}
+
+func (s *BillParticularService) UpdateParticularWithOwner(id uint, updates map[string]interface{}, ownerCtx *utils.OwnerContext) error {
+	return s.particularRepo.UpdateWithOwner(id, updates, ownerCtx)
+}
+
+func (s *BillParticularService) DeleteParticularWithOwner(id uint, ownerCtx *utils.OwnerContext) error {
+	return s.particularRepo.DeleteWithOwner(id, ownerCtx)
 }

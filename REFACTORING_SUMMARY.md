@@ -72,7 +72,7 @@ config/
 
 3. **NewsService** - Complex role-based access control:
    - `system_admin` / `national_admin` - Full access
-   - `regional_admin` - Access to assigned region and its zones/schools
+   - `region_admin` - Access to assigned region and its zones/schools
    - `zone_admin` - Access to assigned zone and its schools
    - `school_user` - Access to assigned school only
    - Targeting validation ensuring users can only target entities under their jurisdiction

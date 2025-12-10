@@ -12,10 +12,10 @@ type Role struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`
 
-	Name *string `json:"name" gorm:"column:name"`
-	NameTag *[]byte `json:"name_tag" gorm:"column:name_tag"`
+	Name        *string `json:"name" gorm:"column:name"`
+	NameTag     *[]byte `json:"name_tag" gorm:"column:name_tag"`
 	Description *string `json:"description" gorm:"column:description"`
-	AuthKey *string `json:"auth_key" gorm:"column:auth_key"`
+	AuthKey     *string `json:"auth_key" gorm:"column:auth_key"`
 }
 
 func (Role) TableName() string {

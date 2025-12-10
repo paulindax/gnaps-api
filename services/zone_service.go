@@ -4,6 +4,7 @@ import (
 	"errors"
 	"gnaps-api/models"
 	"gnaps-api/repositories"
+	"gnaps-api/utils"
 )
 
 type ZoneService struct {
@@ -101,4 +102,26 @@ func (s *ZoneService) DeleteZone(id uint) error {
 	}
 
 	return s.zoneRepo.Delete(id)
+}
+
+// ============================================
+// Role-Based Filtering Methods
+// ============================================
+
+// ListZonesWithRole returns zones filtered by role-based access
+func (s *ZoneService) ListZonesWithRole(filters map[string]interface{}, page, limit int, ownerCtx *utils.OwnerContext) ([]models.Zone, int64, error) {
+	regionID := ownerCtx.GetRegionIDFilter()
+	zoneID := ownerCtx.GetZoneIDFilter()
+	return s.zoneRepo.ListWithRoleFilter(filters, page, limit, regionID, zoneID)
+}
+
+// GetZoneByIDWithRole returns a zone if accessible by the user's role
+func (s *ZoneService) GetZoneByIDWithRole(id uint, ownerCtx *utils.OwnerContext) (*models.Zone, error) {
+	regionID := ownerCtx.GetRegionIDFilter()
+	zoneID := ownerCtx.GetZoneIDFilter()
+	zone, err := s.zoneRepo.FindByIDWithRoleFilter(id, regionID, zoneID)
+	if err != nil {
+		return nil, errors.New("zone not found or access denied")
+	}
+	return zone, nil
 }

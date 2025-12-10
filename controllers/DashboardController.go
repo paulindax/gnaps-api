@@ -66,7 +66,7 @@ func (d *DashboardController) stats(c *fiber.Ctx) error {
 		stats = d.dashboardService.GetSystemAdminStats()
 	case "national_admin":
 		stats = d.dashboardService.GetNationalAdminStats()
-	case "regional_admin":
+	case "region_admin":
 		// Find executive record for this user to get assigned regions
 		var executive models.Executive
 		if err := DB.Where("user_id = ? AND is_deleted = ?", userID, 0).First(&executive).Error; err != nil {
@@ -100,7 +100,7 @@ func (d *DashboardController) stats(c *fiber.Ctx) error {
 				"error": err.Error(),
 			})
 		}
-	case "school_user":
+	case "school_admin":
 		// Find school for this user
 		var school models.School
 		if err := DB.Where("user_id = ? AND is_deleted = ?", userID, false).First(&school).Error; err != nil {

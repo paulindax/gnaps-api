@@ -4,6 +4,7 @@ import (
 	"errors"
 	"gnaps-api/models"
 	"gnaps-api/repositories"
+	"gnaps-api/utils"
 )
 
 type RegionService struct {
@@ -82,4 +83,26 @@ func (s *RegionService) DeleteRegion(id uint) error {
 	}
 
 	return s.regionRepo.Delete(id)
+}
+
+// ============================================
+// Role-Based Filtering Methods
+// ============================================
+
+// ListRegionsWithRole returns regions filtered by role-based access
+func (s *RegionService) ListRegionsWithRole(filters map[string]interface{}, page, limit int, ownerCtx *utils.OwnerContext) ([]models.Region, int64, error) {
+	regionID := ownerCtx.GetRegionIDFilter()
+	zoneID := ownerCtx.GetZoneIDFilter()
+	return s.regionRepo.ListWithRoleFilter(filters, page, limit, regionID, zoneID)
+}
+
+// GetRegionByIDWithRole returns a region if accessible by the user's role
+func (s *RegionService) GetRegionByIDWithRole(id uint, ownerCtx *utils.OwnerContext) (*models.Region, error) {
+	regionID := ownerCtx.GetRegionIDFilter()
+	zoneID := ownerCtx.GetZoneIDFilter()
+	region, err := s.regionRepo.FindByIDWithRoleFilter(id, regionID, zoneID)
+	if err != nil {
+		return nil, errors.New("region not found or access denied")
+	}
+	return region, nil
 }
