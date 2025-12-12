@@ -70,6 +70,9 @@ func (r *SchoolRepository) List(filters map[string]interface{}, page, limit int)
 			// Handle JSON array contains for school_group_ids
 			// MySQL JSON_CONTAINS syntax
 			query = query.Where("JSON_CONTAINS(school_group_ids, ?, '$')", fmt.Sprintf("%v", value))
+		} else if key == "region_id" {
+			// Handle region_id by filtering through zones
+			query = query.Where("zone_id IN (SELECT id FROM zones WHERE region_id = ? AND is_deleted = ?)", value, false)
 		} else {
 			query = query.Where(key+" = ?", value)
 		}
@@ -183,6 +186,9 @@ func (r *SchoolRepository) ListWithRoleFilter(filters map[string]interface{}, pa
 		} else if key == "school_group_id" {
 			// Handle JSON array contains for school_group_ids
 			query = query.Where("JSON_CONTAINS(school_group_ids, ?, '$')", fmt.Sprintf("%v", value))
+		} else if key == "region_id" {
+			// Handle region_id by filtering through zones
+			query = query.Where("zone_id IN (SELECT id FROM zones WHERE region_id = ? AND is_deleted = ?)", value, false)
 		} else {
 			query = query.Where(key+" = ?", value)
 		}

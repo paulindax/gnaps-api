@@ -48,6 +48,9 @@ func (s *SchoolsController) list(c *fiber.Ctx) error {
 
 	// Parse filters from query params
 	filters := make(map[string]interface{})
+	if regionID := c.Query("region_id"); regionID != "" {
+		filters["region_id"] = regionID
+	}
 	if zoneID := c.Query("zone_id"); zoneID != "" {
 		filters["zone_id"] = zoneID
 	}
